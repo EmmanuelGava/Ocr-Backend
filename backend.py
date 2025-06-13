@@ -128,22 +128,22 @@ def extract_invoice_data(text):
     
     # Patrones de expresiones regulares para extraer datos (mejorados)
     # CUIT/CUIL: 11 dígitos con o sin guiones, o DNI/Pasaporte, o ID Fiscal
-    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE|CIF|NIF)[:\s]*(\b\d{1,2}[-\s]?\d{7,8}[-\s]?\d{1}\b|\b\d{11}\b|[A-Z]\d{7,8}[A-Z])' # Added CIF/NIF and alphanumeric pattern for CIF/NIF
+    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE|CIF|NIF|RUC)[:\s]*([A-Z0-9]{1,3}[-\s]?\d{6,8}[-\s]?\d{1,2}|\b\d{11}\b|[A-Z]\d{7,8}[A-Z])' # Added CIF/NIF and alphanumeric pattern for CIF/NIF
     
     # Fecha: Ampliar formatos de fecha (DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA, AAAA-MM-DD) y permitir espacios opcionales alrededor de separadores
-    fecha_pattern = r'(?:FECHA|DATE|Fecha|Date|EMISION)(?:\s*de\s*Emisi[oó]n)?:[:\s]*(\d{1,2}[\s/\.\-]?\d{1,2}[\s/\.\-]?\d{2,4}|\d{4}[\s/\.\-]?\d{1,2}[\s/\.\-]?\d{1,2})'
+    fecha_pattern = r'(?:FECHA|DATE|EMISION|FECHA\s*DE\s*EMISION|FECHA\s*DE\s*EMISI[OÓ]N)[:\s]*(\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4}|\d{4}[/\.\-]\d{1,2}[/\.\-]\d{1,2})'
     
     # Razón Social: Buscar cerca de CUIT/CUIL o con palabras clave comunes
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL o de la palabra "RAZON SOCIAL"
     
     # Número de factura: Ampliar formatos, incluyendo prefijos y sufijos comunes
-    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO|Comp\.Nro|N[°º]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z]?\s*[\\d\\s\\.\\-\\/—]+)[\\.\\s]*' # Kept the original pattern that includes /
+    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO|Comp\.Nro|N[°º]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z0-9]+(?:[\s\.\-\/][A-Z0-9]+)*)'
     
     # Importe total: Más robusto, considerando diferentes escrituras de moneda y separadores
-    total_pattern = r'(?:TOTAL(?=.*\s*A\s*PAGAR)?|IMPORTE\s*TOTAL|GRAN\s*TOTAL|SUBTOTAL|NETO\s*A\s*PAGAR)[:\s$]*([\-]?\s*\$?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
+    total_pattern = r'(?:TOTAL(?=.*\s*A\s*PAGAR)?|IMPORTE\s*TOTAL|GRAN\s*TOTAL|SUBTOTAL|NETO\s*A\s*PAGAR|IMPORTE\s*NETO\s*GRAVADO)[:\s$]*([\-]?\s*\$?[\s]*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
     # IVA: Más robusto, considerando diferentes escrituras y separadores
-    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s$]*([\-]?\s*\$?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
+    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s$]*([\-]?\s*\$?[\s]*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
     # Buscar CUIT/CUIL
     cuit_match = re.search(cuit_pattern, text, re.IGNORECASE)
