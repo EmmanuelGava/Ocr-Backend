@@ -15,17 +15,32 @@ import cv2
 import numpy as np
 from decimal import Decimal, InvalidOperation
 
-# Importaciones de Surya-OCR
-from surya.ocr import run_ocr
-from surya.model.detection.segformer import load_model as load_det_model, load_processor as load_det_processor
-from surya.model.recognition.model import load_model as load_rec_model
-from surya.model.recognition.processor import load_processor as load_rec_processor
+# Importaciones de EasyOCR
+import easyocr
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Invoice OCR API")
+
+# Inicializar EasyOCR Reader (se cargará una sola vez)
+# Especificamos los idiomas español ('es') e inglés ('en') para mayor robustez.
+# El parámetro `gpu=False` es crucial si tu entorno de despliegue no tiene GPU para evitar crashes de memoria.
+reader = None
+
+def load_easyocr_reader():
+    global reader
+    if reader is None:
+        logger.info("Cargando modelos de EasyOCR...")
+        # Inicializar el lector de EasyOCR, especificando los idiomas deseados.
+        # Descargará los modelos la primera vez si no están en caché.
+        try:
+            reader = easyocr.Reader(['es', 'en'], gpu=False) # Forzar CPU para despliegues con memoria limitada
+            logger.info("Modelos de EasyOCR cargados.")
+        except Exception as e:
+            logger.error(f"Error al cargar modelos de EasyOCR: {e}")
+            raise HTTPException(status_code=500, detail=f"Error al cargar modelos de EasyOCR: {str(e)}")
 
 # Configurar CORS para permitir solicitudes desde el frontend
 app.add_middleware(
@@ -60,49 +75,31 @@ async def general_exception_handler(request, exc):
     )
 
 # Función para extraer texto de una imagen usando OCR
-det_processor, det_model = None, None
-rec_model, rec_processor = None, None
-
-def load_surya_models():
-    """Carga los modelos de Surya-OCR."""
-    global det_processor, det_model, rec_model, rec_processor
-    if det_model is None:
-        logger.info("Cargando modelos de Surya-OCR...")
-        det_processor, det_model = load_det_processor(), load_det_model()
-        rec_model, rec_processor = load_rec_model(), load_rec_processor()
-        logger.info("Modelos de Surya-OCR cargados.")
-
 def extract_text_from_image(image: Image.Image):
     try:
-        load_surya_models() # Asegurarse de que los modelos estén cargados
+        load_easyocr_reader() # Asegurarse de que el lector esté cargado
         
-        # Surya funciona mejor con imágenes en color o escala de grises, no binarizadas estrictamente por defecto
-        # Se puede experimentar con preprocess_image si los resultados iniciales no son óptimos
-        # Para empezar, pasamos la imagen directamente o después de una ligera mejora
+        # Convertir la imagen PIL a un array de NumPy (formato preferido por OpenCV y EasyOCR)
+        image_np = np.array(image.convert('RGB')) # EasyOCR prefiere RGB
         
-        # Convertir la imagen a un formato compatible con Surya si no lo es ya (PIL Image es compatible)
-        # No aplicamos binarización fuerte aquí, dejamos que Surya maneje el preprocesamiento interno o lo adaptamos más tarde si es necesario.
-        # Si la imagen ya es PIL.Image, la pasamos directamente.
+        # Opcional: Aplicar preprocesamiento si es necesario, aunque EasyOCR maneja bastante bien las imágenes crudas.
+        # processed_image_np = preprocess_image(image_np) # Descomentar si el preprocesamiento mejora los resultados
         
-        # Ejecutar OCR con Surya
-        # Especificar el idioma español. Surya espera una lista de imágenes y una lista de listas de idiomas.
-        # Asumimos que la imagen es en español.
-        predictions = run_ocr([image], [["es"]], det_model, det_processor, rec_model, rec_processor)
+        # Ejecutar OCR con EasyOCR
+        # EasyOCR devuelve una lista de tuplas: (bbox, text, confidence)
+        results = reader.readtext(image_np, detail=0) # detail=0 para obtener solo el texto
         
-        full_text = []
-        for page_prediction in predictions:
-            for line in page_prediction.text_lines:
-                full_text.append(line.text)
-        
-        return "\n".join(full_text)
+        full_text = "\n".join(results)
+        logger.info(f"Texto extraído de la imagen (primeros 100 chars): {full_text[:100]}")
+        return full_text
     except Exception as e:
-        logger.error(f"Error en OCR con Surya: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en OCR con Surya: {str(e)}")
+        logger.error(f"Error en OCR con EasyOCR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en OCR con EasyOCR: {str(e)}")
 
 # Nueva función para preprocesar la imagen
 def preprocess_image(pil_image: Image.Image):
     """Mejora la imagen para el OCR aplicando filtros.
-    Esta función ahora es opcional para Surya y puede ser ajustada o eliminada si Surya maneja
+    Esta función ahora es opcional y puede ser ajustada o eliminada si EasyOCR maneja
     el preprocesamiento internamente de manera más efectiva.
     """
     # Convertir a escala de grises si la imagen no lo está ya
@@ -112,7 +109,7 @@ def preprocess_image(pil_image: Image.Image):
         image_np = np.array(pil_image)
     
     # Aplicar umbralización (Otsu's Binarization)
-    # Experimenta con diferentes umbralizaciones o considera no aplicarla para Surya
+    # Experimenta con diferentes umbralizaciones o considera no aplicarla para EasyOCR
     _, thresh = cv2.threshold(image_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     return Image.fromarray(thresh)
@@ -384,7 +381,7 @@ def extract_line_items(text: str) -> list:
     line_item_patterns = [
         # 1. Code (opt), Desc, Qty, Unit Price, Line Total
         re.compile(r"^\s*" + code_pattern_str + desc_pattern_str + num_pattern_str + r"\s+" + num_pattern_str + r"\s+" + num_pattern_str + r"\s*$", re.IGNORECASE),
-        # 2. Code (opt), Desc, Qty, Line Total (Unit Price is missing)
+        # 2. Code (opt), Desc, Qty, Total (Unit Price is missing)
         re.compile(r"^\s*" + code_pattern_str + desc_pattern_str + num_pattern_str + r"\s+" + num_pattern_str + r"\s*$", re.IGNORECASE),
         # 3. Code (opt), Desc, Line Total (Qty and Unit Price are missing)
         re.compile(r"^\s*" + code_pattern_str + desc_pattern_str + num_pattern_str + r"\s*$", re.IGNORECASE),
