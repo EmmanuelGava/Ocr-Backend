@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-import pytesseract
 import re
 import io
 import pandas as pd
@@ -12,6 +11,15 @@ import pdf2image
 import os
 import tempfile
 import logging
+import cv2
+import numpy as np
+from decimal import Decimal, InvalidOperation
+
+# Importaciones de Surya-OCR
+from surya.ocr import run_ocr
+from surya.model.detection.segformer import load_model as load_det_model, load_processor as load_det_processor
+from surya.model.recognition.model import load_model as load_rec_model
+from surya.model.recognition.processor import load_processor as load_rec_processor
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -52,19 +60,72 @@ async def general_exception_handler(request, exc):
     )
 
 # Función para extraer texto de una imagen usando OCR
-def extract_text_from_image(image):
+det_processor, det_model = None, None
+rec_model, rec_processor = None, None
+
+def load_surya_models():
+    """Carga los modelos de Surya-OCR."""
+    global det_processor, det_model, rec_model, rec_processor
+    if det_model is None:
+        logger.info("Cargando modelos de Surya-OCR...")
+        det_processor, det_model = load_det_processor(), load_det_model()
+        rec_model, rec_processor = load_rec_model(), load_rec_processor()
+        logger.info("Modelos de Surya-OCR cargados.")
+
+def extract_text_from_image(image: Image.Image):
     try:
-        # Configuración para español
-        text = pytesseract.image_to_string(image, lang='spa')
-        logger.info(f"Texto extraído de la imagen (primeros 100 chars): {text[:100]}")
-        return text
+        load_surya_models() # Asegurarse de que los modelos estén cargados
+        
+        # Surya funciona mejor con imágenes en color o escala de grises, no binarizadas estrictamente por defecto
+        # Se puede experimentar con preprocess_image si los resultados iniciales no son óptimos
+        # Para empezar, pasamos la imagen directamente o después de una ligera mejora
+        
+        # Convertir la imagen a un formato compatible con Surya si no lo es ya (PIL Image es compatible)
+        # No aplicamos binarización fuerte aquí, dejamos que Surya maneje el preprocesamiento interno o lo adaptamos más tarde si es necesario.
+        # Si la imagen ya es PIL.Image, la pasamos directamente.
+        
+        # Ejecutar OCR con Surya
+        # Especificar el idioma español. Surya espera una lista de imágenes y una lista de listas de idiomas.
+        # Asumimos que la imagen es en español.
+        predictions = run_ocr([image], [["es"]], det_model, det_processor, rec_model, rec_processor)
+        
+        full_text = []
+        for page_prediction in predictions:
+            for line in page_prediction.text_lines:
+                full_text.append(line.text)
+        
+        return "\n".join(full_text)
     except Exception as e:
-        logger.error(f"Error en OCR: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en OCR: {str(e)}")
+        logger.error(f"Error en OCR con Surya: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en OCR con Surya: {str(e)}")
+
+# Nueva función para preprocesar la imagen
+def preprocess_image(pil_image: Image.Image):
+    """Mejora la imagen para el OCR aplicando filtros.
+    Esta función ahora es opcional para Surya y puede ser ajustada o eliminada si Surya maneja
+    el preprocesamiento internamente de manera más efectiva.
+    """
+    # Convertir a escala de grises si la imagen no lo está ya
+    if pil_image.mode != 'L':
+        image_np = np.array(pil_image.convert('L'))
+    else:
+        image_np = np.array(pil_image)
+    
+    # Aplicar umbralización (Otsu's Binarization)
+    # Experimenta con diferentes umbralizaciones o considera no aplicarla para Surya
+    _, thresh = cv2.threshold(image_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    return Image.fromarray(thresh)
 
 # Función para extraer datos específicos del texto
 def extract_invoice_data(text):
     logger.info(f"Texto recibido para extracción de datos (primeras 500 chars):\n{text[:500]}")
+    logger.debug(f"Texto completo para extracción de datos:\n{text}") # Logging del texto completo
+    
+    # Aplicar corrección de errores comunes de OCR
+    text = correct_ocr_errors(text)
+    logger.debug(f"Texto después de corrección de OCR:\n{text}") # Logging del texto corregido
+    
     # Inicializar diccionario de datos
     data = {
         "cuit_cuil": None,
@@ -87,13 +148,13 @@ def extract_invoice_data(text):
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL o de la palabra "RAZON SOCIAL"
     
     # Número de factura: Ampliar formatos, incluyendo prefijos y sufijos comunes
-    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO|Comp\.Nro|N[°º]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z]?\s*[\d\s\.\-\\/—]+)[\.\s]*' # Kept the original pattern that includes /
+    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO|Comp\.Nro|N[°º]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z]?\s*[\\d\\s\\.\\-\\/—]+)[\\.\\s]*' # Kept the original pattern that includes /
     
     # Importe total: Más robusto, considerando diferentes escrituras de moneda y separadores
-    total_pattern = r'(?:TOTAL|IMPORTE\s*TOTAL|NETO\s*A\s*PAGAR|GRAN\s*TOTAL|Subtotal|Total\s*a\s*Pagar|\$|€|£|Base\s*imponible)[:\s$]*(\-?[\\d\\s\\.,]+)'
+    total_pattern = r'(?:TOTAL(?=.*\s*A\s*PAGAR)?|IMPORTE\s*TOTAL|GRAN\s*TOTAL|SUBTOTAL|NETO\s*A\s*PAGAR)[:\s$]*([\-]?\s*\$?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
     # IVA: Más robusto, considerando diferentes escrituras y separadores
-    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s$]*(\-?[\\d\\s\\.,]+)'
+    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s$]*([\-]?\s*\$?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
     # Buscar CUIT/CUIL
     cuit_match = re.search(cuit_pattern, text, re.IGNORECASE)
@@ -253,41 +314,29 @@ def extract_invoice_data(text):
         logger.warning("Número de factura no encontrado.")
     
     # Buscar importe total
-    # total_match = re.search(total_pattern, text, re.IGNORECASE) # This initial search is not strictly necessary if findall is used next
-    all_total_matches = re.findall(total_pattern, text, re.IGNORECASE)
-    if all_total_matches:
-        # Limpiar el valor: eliminar espacios, comas, y asegurar un formato de punto decimal
-        # Y eliminar caracteres no numéricos o de puntuación esperados
-        raw_total = all_total_matches[-1] # Tomar la última coincidencia
-        cleaned_total = re.sub(r'[^\d\.,-]', '', raw_total).replace(' ', '').replace(',', '.') # Allow hyphen for negative numbers, remove spaces
-        # Validar si es un número válido antes de asignar
-        if re.match(r'^\-?\d+(\.\d+)?$', cleaned_total): # Ensure it's a valid decimal
-            data["importe_total"] = cleaned_total
+    total_match = re.search(total_pattern, text, re.IGNORECASE)
+    if total_match:
+        # Tomar la última coincidencia como el total más probable
+        all_total_matches = re.findall(total_pattern, text, re.IGNORECASE)
+        if all_total_matches:
+            raw_total = all_total_matches[-1]
+            data["importe_total"] = clean_currency(raw_total)
             logger.info(f"Importe total encontrado: {data['importe_total']}")
-        else:
-            logger.warning(f"Importe total ({raw_total}) no válido después de la limpieza: {cleaned_total}")
-            data["importe_total"] = None # Ensure it's None if not valid
-    else:
-        logger.warning("Importe total no encontrado.")
+            if data["importe_total"] is None:
+                logger.warning(f"Importe total no válido después de la limpieza: {raw_total}")
     
     # Buscar IVA
-    # iva_match = re.search(iva_pattern, text, re.IGNORECASE) # Similar to total, findall is more robust for "last match"
-    all_iva_matches = re.findall(iva_pattern, text, re.IGNORECASE)
-    if all_iva_matches:
-        # Limpiar el valor: eliminar espacios, comas, y asegurar un formato de punto decimal
-        # Y eliminar caracteres no numéricos o de puntuación esperados
-        raw_iva = all_iva_matches[-1] # Tomar la última coincidencia
-        cleaned_iva = re.sub(r'[^\d\.,%-]', '', raw_iva).replace(' ', '').replace(',', '.') # Include % and hyphen for IVA, remove spaces
-        # Validar si es un número válido antes de asignar
-        if re.match(r'^\-?\d+(\.\d+)?%?$', cleaned_iva): # Allow number or number with %
-            data["iva"] = cleaned_iva
+    iva_match = re.search(iva_pattern, text, re.IGNORECASE)
+    if iva_match:
+        # Tomar la última coincidencia como el IVA más probable
+        all_iva_matches = re.findall(iva_pattern, text, re.IGNORECASE)
+        if all_iva_matches:
+            raw_iva = all_iva_matches[-1]
+            data["iva"] = clean_currency(raw_iva)
             logger.info(f"IVA encontrado: {data['iva']}")
-        else:
-            logger.warning(f"IVA ({raw_iva}) no válido después de la limpieza: {cleaned_iva}")
-            data["iva"] = None # Ensure it's None if not valid
-    else:
-        logger.warning("IVA no encontrado.")
-    
+            if data["iva"] is None:
+                logger.warning(f"IVA no válido después de la limpieza: {raw_iva}")
+
     logger.info(f"Resumen de datos de factura extraídos: CUIT={data['cuit_cuil']}, Fecha={data['fecha']}, RazonSocial={data['razon_social']}, FacturaNro={data['numero_factura']}, Total={data['importe_total']}, IVA={data['iva']}")
     
     # Extraer ítems de línea
@@ -632,3 +681,53 @@ async def upload_file(file: UploadFile = File(...)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# Nueva función para limpiar y convertir valores de moneda
+def clean_currency(value):
+    """Limpia una cadena de valor monetario y la convierte a float."""
+    if value is None:
+        return None
+    try:
+        # Eliminar espacios, símbolos de moneda y reemplazar comas por puntos
+        cleaned_value = value.replace(' ', '').replace('$', '').replace('€', '').replace('£', '').replace(',', '.')
+        # Eliminar cualquier guion que no sea el de un número negativo
+        if cleaned_value.count('-') > 1: # Si hay más de un guion, es probable que sea un separador mal reconocido
+            cleaned_value = cleaned_value.replace('-', '', 1) # Eliminar solo el primero si hay más de uno
+        
+        # Asegurarse de que solo el último punto sea el decimal, si hay varios
+        parts = cleaned_value.split('.')
+        if len(parts) > 2:
+            cleaned_value = ''.join(parts[:-1]) + '.' + parts[-1]
+        elif len(parts) == 2 and len(parts[-1]) != 2: # Si solo hay un punto pero no dos decimales, puede ser un separador de miles
+            # Esto es una heurística y puede fallar. Asume que si no hay 2 decimales, el punto es de miles.
+            cleaned_value = cleaned_value.replace('.', '')
+            # Si el último segmento tiene 2 dígitos, es un decimal. Ej: 1.234,56 -> 1234.56, 1.23 -> 1.23 (no cambia)
+            if len(parts[-1]) == 2:
+                cleaned_value = ''.join(parts[:-1]) + '.' + parts[-1]
+            else:
+                cleaned_value = ''.join(parts)
+
+        return float(Decimal(cleaned_value)) # Convertir a Decimal para mayor precisión y luego a float
+    except InvalidOperation:
+        logger.warning(f"InvalidOperation al limpiar valor monetario: {value}")
+        return None
+    except Exception as e:
+        logger.error(f"Error al limpiar valor monetario '{value}': {str(e)}")
+        return None
+
+# Nueva función para corregir errores comunes de OCR
+def correct_ocr_errors(text):
+    """Reemplaza errores comunes de OCR en el texto."""
+    replacements = {
+        'O': '0',
+        'I': '1',
+        'l': '1',
+        'Z': '2',
+        'S': '5',
+        'B': '8', # Añadido por posible confusión con 8
+        'g': '9', # Añadido por posible confusión con 9
+        'E': '6', # Añadido por posible confusión con 6
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
