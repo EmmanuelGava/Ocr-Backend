@@ -63,6 +63,7 @@ def extract_text_from_image(image):
 
 # Función para extraer datos específicos del texto
 def extract_invoice_data(text):
+    logger.info(f"Texto recibido para extracción de datos (primeras 500 chars):\n{text[:500]}")
     # Inicializar diccionario de datos
     data = {
         "cuit_cuil": None,
@@ -89,11 +90,13 @@ def extract_invoice_data(text):
     cuit_match = re.search(cuit_pattern, text, re.IGNORECASE)
     if cuit_match:
         data["cuit_cuil"] = cuit_match.group(1).strip()
+        logger.info(f"CUIT/CUIL encontrado: {data["cuit_cuil"]}")
     
     # Buscar fecha
     fecha_match = re.search(fecha_pattern, text, re.IGNORECASE)
     if fecha_match:
         data["fecha"] = fecha_match.group(1).strip()
+        logger.info(f"Fecha encontrada: {data["fecha"]}")
     
     # Buscar razón social (simplificado - asumimos que está cerca de "CUIT" o "RAZÓN SOCIAL")
     lines = text.split('\n')
@@ -101,23 +104,28 @@ def extract_invoice_data(text):
         if "RAZÓN SOCIAL" in line.upper() or "RAZON SOCIAL" in line.upper():
             if i + 1 < len(lines) and lines[i + 1].strip():
                 data["razon_social"] = lines[i + 1].strip()
+                logger.info(f"Razón Social encontrada: {data["razon_social"]}")
                 break
     
     # Buscar número de factura
     factura_match = re.search(factura_pattern, text, re.IGNORECASE)
     if factura_match:
         data["numero_factura"] = factura_match.group(1).strip()
+        logger.info(f"Número de factura encontrado: {data["numero_factura"]}")
     
     # Buscar importe total
     total_match = re.search(total_pattern, text, re.IGNORECASE)
     if total_match:
         data["importe_total"] = total_match.group(1).strip().replace('.', '').replace(',', '.')
+        logger.info(f"Importe total encontrado: {data["importe_total"]}")
     
     # Buscar IVA
     iva_match = re.search(iva_pattern, text, re.IGNORECASE)
     if iva_match:
         data["iva"] = iva_match.group(1).strip().replace('.', '').replace(',', '.')
+        logger.info(f"IVA encontrado: {data["iva"]}")
     
+    logger.info(f"Datos de factura extraídos: {data}")
     return data
 
 # Añadir endpoint de health check
