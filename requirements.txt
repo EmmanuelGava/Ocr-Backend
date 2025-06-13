@@ -8,3 +8,4 @@ openpyxl==3.1.2
 Pillow
 opencv-python-headless
 surya-ocr
+easyocr
