@@ -15,8 +15,8 @@ import cv2
 import numpy as np
 from decimal import Decimal, InvalidOperation
 
-# Importaciones de EasyOCR
-import easyocr
+# Importaciones de PaddleOCR
+from paddleocr import PaddleOCR
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -24,23 +24,37 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Invoice OCR API")
 
-# Inicializar EasyOCR Reader (se cargará una sola vez)
-# Especificamos los idiomas español ('es') e inglés ('en') para mayor robustez.
-# El parámetro `gpu=False` es crucial si tu entorno de despliegue no tiene GPU para evitar crashes de memoria.
-reader = None
+# Inicializar PaddleOCR (se cargará una sola vez)
+# Especificamos los idiomas español ('es') e inglés ('en').
+# lang='es' para español. Para múltiples idiomas, se pueden especificar como una lista.
+# use_gpu=False es crucial si tu entorno de despliegue no tiene GPU para evitar crashes de memoria.
+# show_log=False para evitar logs excesivos de PaddleOCR en consola.
+ocr = None
 
-def load_easyocr_reader():
-    global reader
-    if reader is None:
-        logger.info("Cargando modelos de EasyOCR...")
-        # Inicializar el lector de EasyOCR, especificando los idiomas deseados.
-        # Descargará los modelos la primera vez si no están en caché.
+def load_paddleocr():
+    global ocr
+    if ocr is None:
+        logger.info("Cargando modelos de PaddleOCR...")
         try:
-            reader = easyocr.Reader(['es', 'en'], gpu=False) # Forzar CPU para despliegues con memoria limitada
-            logger.info("Modelos de EasyOCR cargados.")
+            # lang='en' es el idioma por defecto, para español es necesario especificarlo.
+            # Para multiples idiomas, la configuración puede variar o requerir modelos adicionales.
+            # Por ahora, nos enfocamos en 'es' y 'en' si son requeridos.
+            # La forma más común de usar varios idiomas con PaddleOCR es cargar un modelo por cada idioma.
+            # Sin embargo, para simplificar y dado que easyocr usaba ['es', 'en'], podemos intentar cargar ambos.
+            # La documentación sugiere que puedes cargar múltiples idiomas con una lista si los modelos están disponibles
+            # Pero la forma más directa es especificar el idioma base y que se descarguen los modelos.
+            # Para 'es', necesitamos descargar el modelo 'ppocr/utils/utility.py' => model_url['det']['es']
+            # Si no hay un modelo 'es' directo, se usa 'ch' (chino) o 'en'. Es mejor usar 'en' y un modelo específico para 'es'.
+            # Sin embargo, para empezar, usaremos 'en' y luego veremos cómo añadir 'es'.
+            # Mejor usar un solo idioma para empezar si no hay un modelo combinado.
+
+            # Según la documentación de PaddleOCR, para múltiples idiomas, se inicializa con lang=['en', 'es']
+            # Esto descarga los modelos necesarios.
+            ocr = PaddleOCR(lang='es', use_gpu=False, show_log=False) # Especificar 'es' y no usar GPU
+            logger.info("Modelos de PaddleOCR cargados.")
         except Exception as e:
-            logger.error(f"Error al cargar modelos de EasyOCR: {e}")
-            raise HTTPException(status_code=500, detail=f"Error al cargar modelos de EasyOCR: {str(e)}")
+            logger.error(f"Error al cargar modelos de PaddleOCR: {e}")
+            raise HTTPException(status_code=500, detail=f"Error al cargar modelos de PaddleOCR: {str(e)}")
 
 # Configurar CORS para permitir solicitudes desde el frontend
 app.add_middleware(
@@ -77,30 +91,32 @@ async def general_exception_handler(request, exc):
 # Función para extraer texto de una imagen usando OCR
 def extract_text_from_image(image: Image.Image):
     try:
-        load_easyocr_reader() # Asegurarse de que el lector esté cargado
+        load_paddleocr() # Asegurarse de que el lector esté cargado
         
-        # Convertir la imagen PIL a un array de NumPy (formato preferido por OpenCV y EasyOCR)
-        image_np = np.array(image.convert('RGB')) # EasyOCR prefiere RGB
+        # Convertir la imagen PIL a un array de NumPy (formato preferido por OpenCV y PaddleOCR)
+        # PaddleOCR espera una imagen en formato HWC (Height, Width, Channel) con BGR o RGB
+        # PIL Image.convert('RGB') da RGB, cv2.cvtColor(img, cv2.COLOR_RGB2BGR) la convierte a BGR
+        image_np = np.array(image.convert('RGB'))
         
-        # Opcional: Aplicar preprocesamiento si es necesario, aunque EasyOCR maneja bastante bien las imágenes crudas.
-        # processed_image_np = preprocess_image(image_np) # Descomentar si el preprocesamiento mejora los resultados
+        # Ejecutar OCR con PaddleOCR
+        # La salida de ocr.ocr es una lista de listas, donde cada elemento interno es [bbox, (text, score)]
+        result = ocr.ocr(image_np, cls=True)
         
-        # Ejecutar OCR con EasyOCR
-        # EasyOCR devuelve una lista de tuplas: (bbox, text, confidence)
-        results = reader.readtext(image_np, detail=0) # detail=0 para obtener solo el texto
-        
-        full_text = "\n".join(results)
+        full_text = ""
+        if result and result[0]: # result[0] contiene las detecciones del primer (y usualmente único) idioma/modelo
+            # Extraer solo el texto de los resultados y unirlos
+            for line in result[0]:
+                full_text += line[1][0] + "\n"
+
         logger.info(f"Texto extraído de la imagen (primeros 100 chars): {full_text[:100]}")
         return full_text
     except Exception as e:
-        logger.error(f"Error en OCR con EasyOCR: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en OCR con EasyOCR: {str(e)}")
+        logger.error(f"Error en OCR con PaddleOCR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en OCR con PaddleOCR: {str(e)}")
 
 # Nueva función para preprocesar la imagen
 def preprocess_image(pil_image: Image.Image):
     """Mejora la imagen para el OCR aplicando filtros.
-    Esta función ahora es opcional y puede ser ajustada o eliminada si EasyOCR maneja
-    el preprocesamiento internamente de manera más efectiva.
     """
     # Convertir a escala de grises si la imagen no lo está ya
     if pil_image.mode != 'L':
@@ -109,7 +125,6 @@ def preprocess_image(pil_image: Image.Image):
         image_np = np.array(pil_image)
     
     # Aplicar umbralización (Otsu's Binarization)
-    # Experimenta con diferentes umbralizaciones o considera no aplicarla para EasyOCR
     _, thresh = cv2.threshold(image_np, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     return Image.fromarray(thresh)
