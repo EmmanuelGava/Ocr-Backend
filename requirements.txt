@@ -6,6 +6,5 @@ pandas
 openpyxl==3.1.2
 Pillow
 opencv-python-headless
-paddleocr
-torch==2.7.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-torchvision==0.22.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+pytesseract
+layoutparser

@@ -15,8 +15,9 @@ import cv2
 import numpy as np
 from decimal import Decimal, InvalidOperation
 
-# Importaciones de PaddleOCR
-from paddleocr import PaddleOCR
+# Importaciones de Tesseract y Layout Parser
+import pytesseract
+import layoutparser as lp
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -24,37 +25,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Invoice OCR API")
 
-# Inicializar PaddleOCR (se cargará una sola vez)
-# Especificamos los idiomas español ('es') e inglés ('en').
-# lang='es' para español. Para múltiples idiomas, se pueden especificar como una lista.
-# use_gpu=False es crucial si tu entorno de despliegue no tiene GPU para evitar crashes de memoria.
-# show_log=False para evitar logs excesivos de PaddleOCR en consola.
-ocr = None
+# Inicializar Layout Parser y Tesseract (si es necesario)
+# Modelos de Layout Parser se cargan una sola vez.
+# layout_model = lp.models.PaddleDetectionLayoutModel(config_path=None, model_path=None, extra_config=None, device='cpu') # Ejemplo si se usara el modelo de deteccion de paddle
 
-def load_paddleocr():
-    global ocr
-    if ocr is None:
-        logger.info("Cargando modelos de PaddleOCR...")
-        try:
-            # lang='en' es el idioma por defecto, para español es necesario especificarlo.
-            # Para multiples idiomas, la configuración puede variar o requerir modelos adicionales.
-            # Por ahora, nos enfocamos en 'es' y 'en' si son requeridos.
-            # La forma más común de usar varios idiomas con PaddleOCR es cargar un modelo por cada idioma.
-            # Sin embargo, para simplificar y dado que easyocr usaba ['es', 'en'], podemos intentar cargar ambos.
-            # La documentación sugiere que puedes cargar múltiples idiomas con una lista si los modelos están disponibles
-            # Pero la forma más directa es especificar el idioma base y que se descarguen los modelos.
-            # Para 'es', necesitamos descargar el modelo 'ppocr/utils/utility.py' => model_url['det']['es']
-            # Si no hay un modelo 'es' directo, se usa 'ch' (chino) o 'en'. Es mejor usar 'en' y un modelo específico para 'es'.
-            # Sin embargo, para empezar, usaremos 'en' y luego veremos cómo añadir 'es'.
-            # Mejor usar un solo idioma para empezar si no hay un modelo combinado.
-
-            # Según la documentación de PaddleOCR, para múltiples idiomas, se inicializa con lang=['en', 'es']
-            # Esto descarga los modelos necesarios.
-            ocr = PaddleOCR(lang='es', use_gpu=False, show_log=False) # Especificar 'es' y no usar GPU
-            logger.info("Modelos de PaddleOCR cargados.")
-        except Exception as e:
-            logger.error(f"Error al cargar modelos de PaddleOCR: {e}")
-            raise HTTPException(status_code=500, detail=f"Error al cargar modelos de PaddleOCR: {str(e)}")
+# Para Tesseract, no hay una inicialización global como PaddleOCR, se usa directamente.
 
 # Configurar CORS para permitir solicitudes desde el frontend
 app.add_middleware(
@@ -91,34 +66,35 @@ async def general_exception_handler(request, exc):
 # Función para extraer texto de una imagen usando OCR
 def extract_text_from_image(image: Image.Image):
     try:
-        load_paddleocr() # Asegurarse de que el lector esté cargado
+        # Preprocesar la imagen (convertir a escala de grises y aplicar umbralización)
+        processed_image = preprocess_image(image)
         
-        # Convertir la imagen PIL a un array de NumPy (formato preferido por OpenCV y PaddleOCR)
-        # PaddleOCR espera una imagen en formato HWC (Height, Width, Channel) con BGR o RGB
-        # PIL Image.convert('RGB') da RGB, cv2.cvtColor(img, cv2.COLOR_RGB2BGR) la convierte a BGR
-        image_np = np.array(image.convert('RGB'))
-        
-        # Ejecutar OCR con PaddleOCR
-        # La salida de ocr.ocr es una lista de listas, donde cada elemento interno es [bbox, (text, score)]
-        result = ocr.ocr(image_np, cls=True)
-        
-        full_text = ""
-        if result and result[0]: # result[0] contiene las detecciones del primer (y usualmente único) idioma/modelo
-            # Extraer solo el texto de los resultados y unirlos
-            for line in result[0]:
-                full_text += line[1][0] + "\n"
+        # Convertir la imagen procesada a un array de NumPy (para LayoutParser si se usa)
+        image_np = np.array(processed_image)
 
+        # Opcional: Detección de diseño con Layout Parser
+        # Si el documento tiene una estructura compleja, esto puede ayudar a organizar el texto.
+        # Ejemplo básico: Esto requiere un modelo preentrenado o entrenar uno.
+        # Por ahora, simplemente usaremos pytesseract en toda la imagen, pero la importación
+        # de layoutparser ya está lista para una futura implementación.
+
+        # Ejecutar OCR con Tesseract
+        # -l spa+eng: Especifica los idiomas español e inglés.
+        # --psm 6: Page Segmentation Mode (PSM) 6 asume una sola columna de texto uniforme.
+        # Otros PSM: 3 (valor predeterminado, automático), 4 (bloque de texto único), 11 (palabras).
+        full_text = pytesseract.image_to_string(processed_image, lang='spa+eng', config='--psm 6')
+        
         logger.info(f"Texto extraído de la imagen (primeros 100 chars): {full_text[:100]}")
         return full_text
     except Exception as e:
-        logger.error(f"Error en OCR con PaddleOCR: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en OCR con PaddleOCR: {str(e)}")
+        logger.error(f"Error en OCR con Tesseract: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en OCR con Tesseract: {str(e)}")
 
 # Nueva función para preprocesar la imagen
 def preprocess_image(pil_image: Image.Image):
     """Mejora la imagen para el OCR aplicando filtros.
     """
-    # Convertir a escala de grises si la imagen no lo está ya
+    # Convertir a escala de grises
     if pil_image.mode != 'L':
         image_np = np.array(pil_image.convert('L'))
     else:
