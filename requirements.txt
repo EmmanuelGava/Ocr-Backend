@@ -6,4 +6,4 @@ pandas
 openpyxl==3.1.2
 Pillow
 opencv-python-headless
-easyocr
+surya-ocr
