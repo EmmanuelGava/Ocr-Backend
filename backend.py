@@ -111,9 +111,8 @@ def extract_invoice_data(text):
     logger.info(f"Texto recibido para extracción de datos (primeras 500 chars):\n{text[:500]}")
     logger.debug(f"Texto completo para extracción de datos:\n{text}") # Logging del texto completo
     
-    # Aplicar corrección de errores comunes de OCR
-    text = correct_ocr_errors(text)
-    logger.debug(f"Texto después de corrección de OCR:\n{text}") # Logging del texto corregido
+    # NO Aplicar corrección de errores comunes de OCR al texto completo aquí. Se hará selectivamente.
+    # logger.debug(f"Texto después de corrección de OCR:\n{text}") # Logging del texto corregido
     
     # Inicializar diccionario de datos
     data = {
@@ -128,27 +127,28 @@ def extract_invoice_data(text):
     
     # Patrones de expresiones regulares para extraer datos (mejorados)
     # CUIT/CUIL: 11 dígitos con o sin guiones, o DNI/Pasaporte, o ID Fiscal
-    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE|CIF|NIF|RUC)[:\s]*([A-Z0-9]{1,3}[-\s]?\d{6,8}[-\s]?\d{1,2}|\b\d{11}\b|[A-Z]\d{7,8}[A-Z])' # Added CIF/NIF and alphanumeric pattern for CIF/NIF
+    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE|CIF|NIF|RUC|NRO\s*IDENTIFICACION\s*FISCAL|REGISTRO\s*FISCAL)[:\s]*([A-Z0-9]{1,3}[-\s]?\d{6,8}[-\s]?\d{1,2}[A-Z]?|\b\d{11}\b)'
     
     # Fecha: Ampliar formatos de fecha (DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA, AAAA-MM-DD) y permitir espacios opcionales alrededor de separadores
-    fecha_pattern = r'(?:FECHA|DATE|EMISION|FECHA\s*DE\s*EMISION|FECHA\s*DE\s*EMISI[OÓ]N)[:\s]*(\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4}|\d{4}[/\.\-]\d{1,2}[/\.\-]\d{1,2})'
+    fecha_pattern = r'(?:FECHA|DATE|EMISION|FECHA\s*DE\s*EMISION|F\.\s*EMISION|FECHA\s*DE\s*EMISI[OÓ]N)[:\s]*(\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4}|\d{4}[/\.\-]\d{1,2}[/\.\-]\d{1,2})'
     
     # Razón Social: Buscar cerca de CUIT/CUIL o con palabras clave comunes
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL o de la palabra "RAZON SOCIAL"
     
     # Número de factura: Ampliar formatos, incluyendo prefijos y sufijos comunes
-    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO|Comp\.Nro|N[°º]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z0-9]+(?:[\s\.\-\/][A-Z0-9]+)*)'
+    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º2]?|COMPROBANTE|REMITO|Comp\.Nro|N[°º2]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z0-9]+(?:[\s\.\-\/][A-Z0-9]+)*)'
     
     # Importe total: Más robusto, considerando diferentes escrituras de moneda y separadores
-    total_pattern = r'(?:TOTAL(?=.*\s*A\s*PAGAR)?|IMPORTE\s*TOTAL|GRAN\s*TOTAL|SUBTOTAL|NETO\s*A\s*PAGAR|IMPORTE\s*NETO\s*GRAVADO)[:\s$]*([\-]?\s*\$?[\s]*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
+    total_pattern = r'(?:TOTAL(?=.*\s*A\s*PAGAR)?|IMPORTE\s*TOTAL|GRAN\s*TOTAL|SUBTOTAL|NETO\s*A\s*PAGAR|IMPORTE\s*NETO\s*GRAVADO)[:\s]*(?:[€£]\s*)?([-\s]?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
     # IVA: Más robusto, considerando diferentes escrituras y separadores
-    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s$]*([\-]?\s*\$?[\s]*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
+    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s]*(?:[€£]\s*)?([-\s]?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
     # Buscar CUIT/CUIL
     cuit_match = re.search(cuit_pattern, text, re.IGNORECASE)
     if cuit_match:
-        data["cuit_cuil"] = cuit_match.group(1).strip()
+        # Aplicar corrección de OCR solo al valor extraído, si es necesario, antes de asignarlo.
+        data["cuit_cuil"] = correct_ocr_errors(cuit_match.group(1).strip())
         logger.info(f"CUIT/CUIL encontrado: {data['cuit_cuil']}")
     else:
         logger.warning("CUIT/CUIL no encontrado.")
@@ -175,7 +175,7 @@ def extract_invoice_data(text):
     ]
 
     # Exclusion list for potential Razón Social matches
-    razon_social_exclusion_pattern = r'(?i)^(?:[\d\s/\.\-]+)$|^(?:(?:Efectivo|Débito|Crédito|Cheque|Transferencia|Contado|Tarjeta))$|^FECHA(?:S)?$|DATE(?:S)?$|EMISION(?:ES)?$|TOTAL(?:ES)?$|IMPORTE(?:S)?$|COMPROBANTE(?:S)?$|FACTURA(?:S)?$|N[°º]?$|C\.U\.I\.T\.?$|CUIT$|CUIL$|NIF$|CIF$|RUC$|PEDIDO$|RECIBO$|ALBARAN$|NOTA$|ORDEN$|CLIENTE$|PROVEEDOR$|DOMICILIO$|DIRECCION$|CONCEPTO$|DESCRIPCION$|CANTIDAD$|PRECIO$|UNIDADES$|SUBTOTAL$|IVA$|IMPUESTO(?:S)?$|GASTO(?:S)?$|ENVIO$|PAGAR$|COBRAR$|VENCIMIENTO$|CODIGO$|REFERENCIA$'
+    razon_social_exclusion_pattern = r'(?i)^(?:[\d\s/\.\-]+)$|^(?:(?:Efectivo|Débito|Crédito|Cheque|Transferencia|Contado|Tarjeta))$|^FECHA(?:S)?$|DATE(?:S)?$|EMISION(?:ES)?$|TOTAL(?:ES)?$|IMPORTE(?:S)?$|COMPROBANTE(?:S)?$|FACTURA(?:S)?$|N[°º]?$|C\.U\.I\.T\.?$|CUIT$|CUIL$|NIF$|CIF$|RUC$|PEDIDO$|RECIBO$|ALBARAN$|NOTA$|ORDEN$|CLIENTE$|PROVEEDOR$|DOMICILIO$|DIRECCION$|CONCEPTO$|DESCRIPCION$|CANTIDAD$|PRECIO$|UNIDADES$|SUBTOTAL$|IVA$|IMPUESTO(?:S)?$|GASTO(?:S)?$|ENVIO$|PAGAR$|COBRAR$|VENCIMIENTO$|CODIGO$|REFERENCIA$|CALLE$|AVENIDA$|AVDA$|NUMERO$|NRO$|CIUDAD$|PROVINCIA$|PAIS$|C\.P\.$|CODIGO\s*POSTAL$'
 
     # Buscar cerca del CUIT
     if cuit_match:
@@ -285,7 +285,8 @@ def extract_invoice_data(text):
     # Buscar fecha
     fecha_match = re.search(fecha_pattern, text, re.IGNORECASE)
     if fecha_match:
-        data["fecha"] = fecha_match.group(1).strip()
+        # Aplicar corrección de OCR al valor de la fecha, si es necesario.
+        data["fecha"] = correct_ocr_errors(fecha_match.group(1).strip())
         logger.info(f"Fecha encontrada: {data['fecha']}")
     else:
         logger.warning("Fecha no encontrada.")
@@ -293,11 +294,8 @@ def extract_invoice_data(text):
     # Buscar número de factura
     factura_match = re.search(factura_pattern, text, re.IGNORECASE)
     if factura_match:
-        # Limpiar el número de factura para eliminar caracteres no deseados
-        raw_numero_factura = factura_match.group(1)
-        # Keep '/' in the cleaned numero_factura as the regex allows it.
-        cleaned_numero_factura = re.sub(r'[^0-9A-Z\-\—\/]', '', raw_numero_factura).strip()
-        data["numero_factura"] = cleaned_numero_factura
+        # Aplicar corrección de OCR al valor de la factura, si es necesario.
+        data["numero_factura"] = correct_ocr_errors(factura_match.group(1).strip())
         logger.info(f"Número de factura encontrado: {data['numero_factura']}")
     else:
         logger.warning("Número de factura no encontrado.")
@@ -305,26 +303,24 @@ def extract_invoice_data(text):
     # Buscar importe total
     total_match = re.search(total_pattern, text, re.IGNORECASE)
     if total_match:
-        # Tomar la última coincidencia como el total más probable
-        all_total_matches = re.findall(total_pattern, text, re.IGNORECASE)
-        if all_total_matches:
-            raw_total = all_total_matches[-1]
-            data["importe_total"] = clean_currency(raw_total)
+        # Aplicar corrección de OCR antes de limpiar el valor monetario
+        cleaned_total = clean_currency(correct_ocr_errors(total_match.group(1).strip()))
+        if cleaned_total is not None:
+            data["importe_total"] = cleaned_total
             logger.info(f"Importe total encontrado: {data['importe_total']}")
-            if data["importe_total"] is None:
-                logger.warning(f"Importe total no válido después de la limpieza: {raw_total}")
+        else:
+            logger.warning(f"Importe total encontrado, pero no pudo ser limpiado: {total_match.group(1).strip()}")
     
     # Buscar IVA
     iva_match = re.search(iva_pattern, text, re.IGNORECASE)
     if iva_match:
-        # Tomar la última coincidencia como el IVA más probable
-        all_iva_matches = re.findall(iva_pattern, text, re.IGNORECASE)
-        if all_iva_matches:
-            raw_iva = all_iva_matches[-1]
-            data["iva"] = clean_currency(raw_iva)
+        # Aplicar corrección de OCR antes de limpiar el valor monetario
+        cleaned_iva = clean_currency(correct_ocr_errors(iva_match.group(1).strip()))
+        if cleaned_iva is not None:
+            data["iva"] = cleaned_iva
             logger.info(f"IVA encontrado: {data['iva']}")
-            if data["iva"] is None:
-                logger.warning(f"IVA no válido después de la limpieza: {raw_iva}")
+        else:
+            logger.warning(f"IVA encontrado, pero no pudo ser limpiado: {iva_match.group(1).strip()}")
 
     logger.info(f"Resumen de datos de factura extraídos: CUIT={data['cuit_cuil']}, Fecha={data['fecha']}, RazonSocial={data['razon_social']}, FacturaNro={data['numero_factura']}, Total={data['importe_total']}, IVA={data['iva']}")
     
@@ -681,7 +677,7 @@ def clean_currency(value) -> Union[float, None]:
         return None
     try:
         # Eliminar espacios, símbolos de moneda y reemplazar comas por puntos
-        cleaned_value = str(value).replace(' ', '').replace('$', '').replace('€', '').replace('£', '').replace(',', '.')
+        cleaned_value = str(value).replace(' ', '').replace('€', '').replace('£', '').replace(',', '.')
         # Eliminar cualquier guion que no sea el de un número negativo
         if cleaned_value.count('-') > 1: # Si hay más de un guion, es probable que sea un separador mal reconocido
             cleaned_value = cleaned_value.replace('-', '', 1) # Eliminar solo el primero si hay más de uno
