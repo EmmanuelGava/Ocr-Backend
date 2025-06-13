@@ -14,6 +14,7 @@ import logging
 import cv2
 import numpy as np
 from decimal import Decimal, InvalidOperation
+from typing import Union
 
 # Importaciones de Tesseract y Layout Parser
 import pytesseract
@@ -399,12 +400,15 @@ def extract_line_items(text: str) -> list:
         "codigo", "producto", "item", "descripcion", "fecha", "factura", "pedido"
     ] # Add more as needed
 
-    def clean_number(s: str) -> float | None:
-        if s is None:
+    def clean_number(s: str) -> Union[float, None]:
+        if s is None or not isinstance(s, str):
             return None
-        s_cleaned = s.strip()
+        s = s.strip()
+        if not s:
+            return None
+
         # Remove spaces
-        s_cleaned = s_cleaned.replace(' ', '')
+        s_cleaned = s.replace(' ', '')
 
         # Standardize decimal and thousands separators
         # Count dots and commas
@@ -671,13 +675,13 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 # Nueva función para limpiar y convertir valores de moneda
-def clean_currency(value):
+def clean_currency(value) -> Union[float, None]:
     """Limpia una cadena de valor monetario y la convierte a float."""
     if value is None:
         return None
     try:
         # Eliminar espacios, símbolos de moneda y reemplazar comas por puntos
-        cleaned_value = value.replace(' ', '').replace('$', '').replace('€', '').replace('£', '').replace(',', '.')
+        cleaned_value = str(value).replace(' ', '').replace('$', '').replace('€', '').replace('£', '').replace(',', '.')
         # Eliminar cualquier guion que no sea el de un número negativo
         if cleaned_value.count('-') > 1: # Si hay más de un guion, es probable que sea un separador mal reconocido
             cleaned_value = cleaned_value.replace('-', '', 1) # Eliminar solo el primero si hay más de uno
