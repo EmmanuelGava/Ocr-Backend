@@ -79,16 +79,16 @@ def extract_invoice_data(text):
     cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE)[:\s]*(\b\d{1,2}[-\s]?\d{7,8}[-\s]?\d{1}\b|\b\d{11}\b)'
     
     # Fecha: Ampliar formatos de fecha (DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA, AAAA-MM-DD)
-    fecha_pattern = r'(?:FECHA|DATE|Fecha|Date|EMISION)[:\s]*(\d{1,2}[/\\.\-]+\d{1,2}[/\\.\-]+\d{2,4}|\d{4}[/\\.\-]+\d{1,2}[/\\.\-]+\d{1,2})'
+    fecha_pattern = r'(?:FECHA|DATE|Fecha|Date|EMISION)(?:\s*de\s*Emisi[oó]n)?:[:\s]*(\d{1,2}[/\\.\-]\d{1,2}[/\\.\-]\d{2,4}|\d{4}[/\\.\-]\d{1,2}[/\\.\-]\d{1,2})'
     
     # Razón Social: Buscar cerca de CUIT/CUIL o con palabras clave comunes
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL o de la palabra "RAZON SOCIAL"
     
     # Número de factura: Ampliar formatos, incluyendo prefijos y sufijos comunes
-    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO)[:\s#]*([A-Z]?\s*\d{2,5}[-\s]?\d{6,8}|\d{4}[-\s]?\d{8})'
+    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO|Comp\.Nro)[:\s#]*([A-Z]?\s*[\d\s\.\-\/—]+)[\.\s]*'
     
     # Importe total: Más robusto, considerando diferentes escrituras de moneda y separadores
-    total_pattern = r'(?:TOTAL|IMPORTE\s*TOTAL|NETO\s*A\s*PAGAR|GRAN\s*TOTAL)[:\s$]*([,\.]+)'
+    total_pattern = r'(?:TOTAL|IMPORTE\s*TOTAL|NETO\s*A\s*PAGAR|GRAN\s*TOTAL|Subtotal|Total\s*a\s*Pagar|\$|€|£)[:\s$]*([\d\s\.,]+)'
     
     # IVA: Más robusto, considerando diferentes escrituras y separadores
     iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s$]*([,\.]+)'
@@ -101,38 +101,64 @@ def extract_invoice_data(text):
     
     # Buscar razón social (mejorado)
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL si se encontró, o cerca de "RAZÓN SOCIAL"
+    # Priorizar la búsqueda en la misma línea o en las adyacentes
+    razon_social_found = False
+    
+    # Patrones para razón social, incluyendo errores comunes de OCR y términos legales
+    # Más específicos para capturar nombres de empresas y evitar fechas/números
+    razon_social_patterns = [
+        r'(?:RAZ[OÓ]N\s*SOCIAL|DENOMINACI[OÓ]N|NOMBRE)[:\s]*([A-Z0-9][A-Za-z0-9\s\.,\-\&]+(?:S\.A\.|S\.R\.L\.|SRL|SA|S\.A\.S|SAS|E\.I\.R\.L|EIRL|LTDA|C\.V\.|CV|\.COM|LIMITADA|EURL|AG)?)', # Empresa con siglas
+        r'(?:RAZ[OÓ]N\s*SOCIAL|DENOMINACI[OÓ]N|NOMBRE)[:\s]*([A-Z][A-Za-z\s\.,\-]+[A-Za-z])' # Solo nombre sin siglas
+    ]
+
+    # Buscar cerca del CUIT
     if cuit_match:
-        # Extraer texto alrededor del CUIT para buscar la razón social
         start_index = text.find(cuit_match.group(0))
-        search_area = text[max(0, start_index - 200):min(len(text), start_index + 200)] # Buscar en 200 chars antes y después
+        search_area = text[max(0, start_index - 100):min(len(text), start_index + 100)] # Reducir área de búsqueda
         
-        # Patrones para razón social
-        razon_social_keywords = ["RAZON SOCIAL", "RAZÓN SOCIAL", "DENOMINACION", "NOMBRE"]
-        
-        for keyword in razon_social_keywords:
-            keyword_upper = keyword.upper()
-            lines = search_area.split('\n')
-            for i, line in enumerate(lines):
-                if keyword_upper in line.upper():
-                    # Intentar capturar la línea siguiente como razón social
-                    if i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r'^[0-9]+\s*(\.?[0-9]+)?([,\.]\d+)?\s*(%|\$)?$', lines[i+1].strip()): # Evitar números solos
-                        data["razon_social"] = lines[i + 1].strip()
-                        logger.info(f"Razón Social encontrada (cerca de {keyword}): {data['razon_social']}")
-                        break
-                if data["razon_social"]:
+        for pattern in razon_social_patterns:
+            razon_social_match = re.search(pattern, search_area, re.IGNORECASE)
+            if razon_social_match:
+                potential_razon_social = razon_social_match.group(1).strip()
+                # Evitar capturar fechas o números puros
+                if not re.match(r'^\\d{1,2}[/\\.\-]?\\d{1,2}[/\\.\-]?\\d{2,4}$|^(?:\\d+(\\.\\d+)?([,\.]\\d+)?)$|^(?:(?:Efectivo|Débito|Crédito|Cheque|Transferencia))$|^FECHA|DATE|EMISION$', potential_razon_social, re.IGNORECASE):
+                    data["razon_social"] = potential_razon_social
+                    logger.info(f"Razón Social encontrada (cerca de CUIT): {data['razon_social']}")
+                    razon_social_found = True
                     break
-            if data["razon_social"]:
+            if razon_social_found:
                 break
-    else:
-        # Si no se encontró cerca del CUIT, intentar búsqueda general
+
+    # Si no se encontró cerca del CUIT, intentar búsqueda general por líneas
+    if not razon_social_found:
         lines = text.split('\n')
         for i, line in enumerate(lines):
-            if "RAZÓN SOCIAL" in line.upper() or "RAZON SOCIAL" in line.upper() or "DENOMINACION" in line.upper():
-                if i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r'^[0-9]+\s*(\.?[0-9]+)?([,\.]\d+)?\s*(%|\$)?$', lines[i+1].strip()):
-                    data["razon_social"] = lines[i + 1].strip()
-                    logger.info(f"Razón Social encontrada (búsqueda general): {data['razon_social']}")
+            # Buscar "Razón Social" o "Denominación" en la misma línea y capturar el resto
+            for pattern in razon_social_patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match and match.group(1).strip():
+                    potential_razon_social = match.group(1).strip()
+                    if not re.match(r'^\\d{1,2}[/\\.\-]?\\d{1,2}[/\\.\-]?\\d{2,4}$|^(?:\\d+(\\.\\d+)?([,\.]\\d+)?)$|^(?:(?:Efectivo|Débito|Crédito|Cheque|Transferencia))$|^FECHA|DATE|EMISION$', potential_razon_social, re.IGNORECASE):
+                        data["razon_social"] = potential_razon_social
+                        logger.info(f"Razón Social encontrada (misma línea general): {data['razon_social']}")
+                        razon_social_found = True
+                        break
+                if razon_social_found:
                     break
-    
+            
+            if razon_social_found:
+                break
+
+            # Si no, buscar la línea siguiente si la anterior contiene la palabra clave
+            if ("RAZÓN SOCIAL" in line.upper() or "RAZON SOCIAL" in line.upper() or "DENOMINACION" in line.upper() or "NOMBRE" in line.upper()) and i + 1 < len(lines):
+                next_line_text = lines[i + 1].strip()
+                # Validar la línea siguiente para asegurar que no sea solo números o fechas
+                if next_line_text and not re.match(r'^\\d+([,\.]\\d+)?([\\.\s]*%)?$|^\\d{1,2}[/\\.\-]?\\d{1,2}[/\\.\-]?\\d{2,4}$|^(?:(?:Efectivo|Débito|Crédito|Cheque|Transferencia))$', next_line_text, re.IGNORECASE): 
+                    data["razon_social"] = next_line_text
+                    logger.info(f"Razón Social encontrada (línea siguiente general): {data['razon_social']}")
+                    razon_social_found = True
+                    break
+
     # Buscar fecha
     fecha_match = re.search(fecha_pattern, text, re.IGNORECASE)
     if fecha_match:
@@ -142,7 +168,10 @@ def extract_invoice_data(text):
     # Buscar número de factura
     factura_match = re.search(factura_pattern, text, re.IGNORECASE)
     if factura_match:
-        data["numero_factura"] = factura_match.group(1).strip()
+        # Limpiar el número de factura para eliminar caracteres no deseados
+        raw_numero_factura = factura_match.group(1)
+        cleaned_numero_factura = re.sub(r'[^0-9A-Z\-\.—]', '', raw_numero_factura).strip()
+        data["numero_factura"] = cleaned_numero_factura
         logger.info(f"Número de factura encontrado: {data['numero_factura']}")
     
     # Buscar importe total
@@ -151,8 +180,16 @@ def extract_invoice_data(text):
         # Tomar la última coincidencia como el total más probable
         all_total_matches = re.findall(total_pattern, text, re.IGNORECASE)
         if all_total_matches:
-            data["importe_total"] = all_total_matches[-1].strip().replace('.', '').replace(',', '.')
-            logger.info(f"Importe total encontrado: {data['importe_total']}")
+            # Limpiar el valor: eliminar espacios, comas, y asegurar un formato de punto decimal
+            # Y eliminar caracteres no numéricos o de puntuación esperados
+            raw_total = all_total_matches[-1]
+            cleaned_total = re.sub(r'[^0-9\.,]', '', raw_total).replace(',', '.')
+            # Validar si es un número válido antes de asignar
+            if re.match(r'^\\d+(\\.\\d+)?$', cleaned_total):
+                data["importe_total"] = cleaned_total
+                logger.info(f"Importe total encontrado: {data['importe_total']}")
+            else:
+                logger.warning(f"Importe total no válido después de la limpieza: {raw_total} -> {cleaned_total}")
     
     # Buscar IVA
     iva_match = re.search(iva_pattern, text, re.IGNORECASE)
@@ -160,8 +197,16 @@ def extract_invoice_data(text):
         # Tomar la última coincidencia como el IVA más probable
         all_iva_matches = re.findall(iva_pattern, text, re.IGNORECASE)
         if all_iva_matches:
-            data["iva"] = all_iva_matches[-1].strip().replace('.', '').replace(',', '.')
-            logger.info(f"IVA encontrado: {data['iva']}")
+            # Limpiar el valor: eliminar espacios, comas, y asegurar un formato de punto decimal
+            # Y eliminar caracteres no numéricos o de puntuación esperados
+            raw_iva = all_iva_matches[-1]
+            cleaned_iva = re.sub(r'[^0-9\.,%]', '', raw_iva).replace(',', '.') # Incluir % para IVA
+            # Validar si es un número válido antes de asignar
+            if re.match(r'^\\d+(\\.\\d+)?$|^\\d+%$', cleaned_iva): # Aceptar porcentaje también
+                data["iva"] = cleaned_iva
+                logger.info(f"IVA encontrado: {data['iva']}")
+            else:
+                logger.warning(f"IVA no válido después de la limpieza: {raw_iva} -> {cleaned_iva}")
     
     logger.info(f"Datos de factura extraídos: {data}")
     return data
