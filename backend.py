@@ -79,7 +79,7 @@ def extract_invoice_data(text):
     cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE)[:\s]*(\b\d{1,2}[-\s]?\d{7,8}[-\s]?\d{1}\b|\b\d{11}\b)'
     
     # Fecha: Ampliar formatos de fecha (DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA, AAAA-MM-DD)
-    fecha_pattern = r'(?:FECHA|DATE|Fecha|Date|EMISION)[:\s]*(\d{1,2}[/-\.]\d{1,2}[/-\.]\d{2,4}|\d{4}[/-\.]\d{1,2}[/-\.]\d{1,2})'
+    fecha_pattern = r'(?:FECHA|DATE|Fecha|Date|EMISION)[:\s]*(\d{1,2}[/\\.\-]+\d{1,2}[/\\.\-]+\d{2,4}|\d{4}[/\\.\-]+\d{1,2}[/\\.\-]+\d{1,2})'
     
     # Razón Social: Buscar cerca de CUIT/CUIL o con palabras clave comunes
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL o de la palabra "RAZON SOCIAL"
