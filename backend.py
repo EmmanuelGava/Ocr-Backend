@@ -74,17 +74,24 @@ def extract_invoice_data(text):
         "iva": None
     }
     
-    # Patrones de expresiones regulares para extraer datos
-    # CUIT/CUIL: 11 dígitos con guiones opcionales
-    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.)[:\s]*([0-9]{2}[-\s]?[0-9]{8}[-\s]?[0-9])'
-    # Fecha: formatos comunes de fecha
-    fecha_pattern = r'(?:FECHA|Date)[:\s]*(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})'
-    # Número de factura
-    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s+N[°º])[:\s]*([A-Z]?[-\s]?[0-9]{4,8}[-\s]?[0-9]{8})'
-    # Importe total
-    total_pattern = r'(?:TOTAL|IMPORTE\s+TOTAL)[:\s]*\$?\s*([\d\.,]+)'
-    # IVA
-    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s+VALOR\s+AGREGADO)[:\s]*\$?\s*([\d\.,]+)'
+    # Patrones de expresiones regulares para extraer datos (mejorados)
+    # CUIT/CUIL: 11 dígitos con o sin guiones, o DNI/Pasaporte, o ID Fiscal
+    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE)[:\s]*(\b\d{1,2}[-\s]?\d{7,8}[-\s]?\d{1}\b|\b\d{11}\b)'
+    
+    # Fecha: Ampliar formatos de fecha (DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA, AAAA-MM-DD)
+    fecha_pattern = r'(?:FECHA|DATE|Fecha|Date|EMISION)[:\s]*(\d{1,2}[/-\.]\d{1,2}[/-\.]\d{2,4}|\d{4}[/-\.]\d{1,2}[/-\.]\d{1,2})'
+    
+    # Razón Social: Buscar cerca de CUIT/CUIL o con palabras clave comunes
+    # Se buscará en un rango de líneas alrededor del CUIT/CUIL o de la palabra "RAZON SOCIAL"
+    
+    # Número de factura: Ampliar formatos, incluyendo prefijos y sufijos comunes
+    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º]?|COMPROBANTE|REMITO)[:\s#]*([A-Z]?\s*\d{2,5}[-\s]?\d{6,8}|\d{4}[-\s]?\d{8})'
+    
+    # Importe total: Más robusto, considerando diferentes escrituras de moneda y separadores
+    total_pattern = r'(?:TOTAL|IMPORTE\s*TOTAL|NETO\s*A\s*PAGAR|GRAN\s*TOTAL)[:\s$]*([,\.]+)'
+    
+    # IVA: Más robusto, considerando diferentes escrituras y separadores
+    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s$]*([,\.]+)'
     
     # Buscar CUIT/CUIL
     cuit_match = re.search(cuit_pattern, text, re.IGNORECASE)
@@ -92,20 +99,45 @@ def extract_invoice_data(text):
         data["cuit_cuil"] = cuit_match.group(1).strip()
         logger.info(f"CUIT/CUIL encontrado: {data["cuit_cuil"]}")
     
+    # Buscar razón social (mejorado)
+    # Se buscará en un rango de líneas alrededor del CUIT/CUIL si se encontró, o cerca de "RAZÓN SOCIAL"
+    if cuit_match:
+        # Extraer texto alrededor del CUIT para buscar la razón social
+        start_index = text.find(cuit_match.group(0))
+        search_area = text[max(0, start_index - 200):min(len(text), start_index + 200)] # Buscar en 200 chars antes y después
+        
+        # Patrones para razón social
+        razon_social_keywords = ["RAZON SOCIAL", "RAZÓN SOCIAL", "DENOMINACION", "NOMBRE"]
+        
+        for keyword in razon_social_keywords:
+            keyword_upper = keyword.upper()
+            lines = search_area.split('\n')
+            for i, line in enumerate(lines):
+                if keyword_upper in line.upper():
+                    # Intentar capturar la línea siguiente como razón social
+                    if i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r'^[0-9]+\s*(\.?[0-9]+)?([,\.]\d+)?\s*(%|\$)?$', lines[i+1].strip()): # Evitar números solos
+                        data["razon_social"] = lines[i + 1].strip()
+                        logger.info(f"Razón Social encontrada (cerca de {keyword}): {data["razon_social"]}")
+                        break
+                if data["razon_social"]:
+                    break
+            if data["razon_social"]:
+                break
+    else:
+        # Si no se encontró cerca del CUIT, intentar búsqueda general
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if "RAZÓN SOCIAL" in line.upper() or "RAZON SOCIAL" in line.upper() or "DENOMINACION" in line.upper():
+                if i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r'^[0-9]+\s*(\.?[0-9]+)?([,\.]\d+)?\s*(%|\$)?$', lines[i+1].strip()):
+                    data["razon_social"] = lines[i + 1].strip()
+                    logger.info(f"Razón Social encontrada (búsqueda general): {data["razon_social"]}")
+                    break
+    
     # Buscar fecha
     fecha_match = re.search(fecha_pattern, text, re.IGNORECASE)
     if fecha_match:
         data["fecha"] = fecha_match.group(1).strip()
         logger.info(f"Fecha encontrada: {data["fecha"]}")
-    
-    # Buscar razón social (simplificado - asumimos que está cerca de "CUIT" o "RAZÓN SOCIAL")
-    lines = text.split('\n')
-    for i, line in enumerate(lines):
-        if "RAZÓN SOCIAL" in line.upper() or "RAZON SOCIAL" in line.upper():
-            if i + 1 < len(lines) and lines[i + 1].strip():
-                data["razon_social"] = lines[i + 1].strip()
-                logger.info(f"Razón Social encontrada: {data["razon_social"]}")
-                break
     
     # Buscar número de factura
     factura_match = re.search(factura_pattern, text, re.IGNORECASE)
@@ -116,14 +148,20 @@ def extract_invoice_data(text):
     # Buscar importe total
     total_match = re.search(total_pattern, text, re.IGNORECASE)
     if total_match:
-        data["importe_total"] = total_match.group(1).strip().replace('.', '').replace(',', '.')
-        logger.info(f"Importe total encontrado: {data["importe_total"]}")
+        # Tomar la última coincidencia como el total más probable
+        all_total_matches = re.findall(total_pattern, text, re.IGNORECASE)
+        if all_total_matches:
+            data["importe_total"] = all_total_matches[-1].strip().replace('.', '').replace(',', '.')
+            logger.info(f"Importe total encontrado: {data["importe_total"]}")
     
     # Buscar IVA
     iva_match = re.search(iva_pattern, text, re.IGNORECASE)
     if iva_match:
-        data["iva"] = iva_match.group(1).strip().replace('.', '').replace(',', '.')
-        logger.info(f"IVA encontrado: {data["iva"]}")
+        # Tomar la última coincidencia como el IVA más probable
+        all_iva_matches = re.findall(iva_pattern, text, re.IGNORECASE)
+        if all_iva_matches:
+            data["iva"] = all_iva_matches[-1].strip().replace('.', '').replace(',', '.')
+            logger.info(f"IVA encontrado: {data["iva"]}")
     
     logger.info(f"Datos de factura extraídos: {data}")
     return data
