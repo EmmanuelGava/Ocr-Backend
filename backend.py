@@ -127,89 +127,93 @@ def extract_invoice_data(text):
     
     # Patrones de expresiones regulares para extraer datos (mejorados)
     # CUIT/CUIL: 11 dígitos con o sin guiones, o DNI/Pasaporte, o ID Fiscal
-    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE|CIF|NIF|RUC|NRO\s*IDENTIFICACION\s*FISCAL|REGISTRO\s*FISCAL)[:\s]*([A-Z0-9]{1,3}[-\s]?\d{6,8}[-\s]?\d{1,2}[A-Z]?|\b\d{11}\b)'
+    cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.|ID\s*FISCAL|DNI|PASAPORTE|CIF|NIF|RUC|NRO\s*IDENTIFICACION\s*FISCAL|REGISTRO\s*FISCAL)[:/\s]*([A-Z]?\d{7,8}[A-Z]?|\b\d{11}\b)'
     
     # Fecha: Ampliar formatos de fecha (DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA, AAAA-MM-DD) y permitir espacios opcionales alrededor de separadores
-    fecha_pattern = r'(?:FECHA|DATE|EMISION|FECHA\s*DE\s*EMISION|F\.\s*EMISION|FECHA\s*DE\s*EMISI[OÓ]N)[:\s]*(\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4}|\d{4}[/\.\-]\d{1,2}[/\.\-]\d{1,2})'
+    fecha_pattern = r'(?:FECHA|DATE|EMISION|FECHA\s*DE\s*EMISION|F\.\s*EMISION|FECHA\s*DE\s*EMISI[OÓ]N)[\s:]*(\d{1,2}[/\.\-]\d{1,2}[/\.\-]\d{2,4}|\d{4}[/\.\-]\d{1,2}[/\.\-]\d{1,2})'
     
     # Razón Social: Buscar cerca de CUIT/CUIL o con palabras clave comunes
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL o de la palabra "RAZON SOCIAL"
     
     # Número de factura: Ampliar formatos, incluyendo prefijos y sufijos comunes
-    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º2]?|COMPROBANTE|REMITO|Comp\.Nro|N[°º2]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z0-9]+(?:[\s\.\-\/][A-Z0-9]+)*)'
+    factura_pattern = r'(?:FACTURA|FAC|FACTURA\s*N[°º2]?|COMPROBANTE|REMITO|Comp\.?\s*Nro|N[°º2]?\s*factura|N[ÚU]MERO\s*DE\s*FACTURA)[:\s#]*([A-Z0-9]+(?:[\s\.\-\/][A-Z0-9]+)*)'
     
     # Importe total: Más robusto, considerando diferentes escrituras de moneda y separadores
-    total_pattern = r'(?:TOTAL(?=.*\s*A\s*PAGAR)?|IMPORTE\s*TOTAL|GRAN\s*TOTAL|SUBTOTAL|NETO\s*A\s*PAGAR|IMPORTE\s*NETO\s*GRAVADO)[:\s]*(?:[€£]\s*)?([-\s]?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
+    total_pattern = r'(?:TOTAL(?=.*\s*A\s*PAGAR)?|IMPORTE\s*TOTAL|GRAN\s*TOTAL|SUBTOTAL|NETO\s*A\s*PAGAR|IMPORTE\s*NETO\s*GRAVADO|TOTAL\s*FACTURA)[:]?[\s]*(?:[\$€£]\s*)?([-\s]?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
     # IVA: Más robusto, considerando diferentes escrituras y separadores
-    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s]*(?:[€£]\s*)?([-\s]?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
+    iva_pattern = r'(?:IVA|I\.V\.A\.|IMPUESTO\s*VALOR\s*AGREGADO|IMPUESTOS)[:\s]*(?:[\$€£]\s*)?([-\s]?\s*\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d{2})?)'
     
+    razon_social_patterns = [
+    r'(?:RAZ[OÓ]N\s*SOCIAL|DENOMINACI[OÓ]N|NOMBRE|EMPRESA|PROVEEDOR|CLIENTE)\s*[:\s]*([A-ZÁÉÍÓÚÑÜ0-9][A-Za-zÁÉÍÓÚÑÜ0-9\s\.,\'\-\&\(\)]+(?:S\.A\.|S\.R\.L\.|...))\s*(?:\n|$)',
+    r'([A-ZÁÉÍÓÚÑÜ0-9][A-Za-zÁÉÍÓÚÑÜ0-9\s\.,\'\-\&\(\)]+)\s+(S\.A\.|S\.R\.L\.|...)',
+    r'^(?:[A-ZÁÉÍÓÚÑÜ0-9][A-Za-zÁÉÍÓÚÑÜ0-9\s\.,\'\-\&\(\)]+[A-Za-zÁÉÍÓÚÑÜ0-9\)])\s*(?:\n|$)'
+]
+
+
+    # Exclusion list for potential Razón Social matches
+    razon_social_exclusion_pattern = r'(?i)^(?:[\d\s/\.\-]+)$|^(?:(?:Efectivo|Débito|Crédito|Cheque|Transferencia|Contado|Tarjeta))$|^FECHA(?:S)?$|DATE(?:S)?$|EMISION(?:ES)?$|TOTAL(?:ES)?$|IMPORTE(?:S)?$|COMPROBANTE(?:S)?$|FACTURA(?:S)?$|N[°º]?$|C\.U\.I\.T\.?$|CUIT$|CUIL$|NIF$|CIF$|RUC$|PEDIDO$|RECIBO$|ALBARAN$|NOTA$|ORDEN$|CLIENTE$|PROVEEDOR$|DOMICILIO$|DIRECCION$|CONCEPTO$|DESCRIPCION$|CANTIDAD$|PRECIO$|UNIDADES$|SUBTOTAL$|IVA$|IMPUESTO(?:S)?$|GASTO(?:S)?$|ENVIO$|PAGAR$|COBRAR$|VENCIMIENTO$|CODIGO$|REFERENCIA$|CALLE$|AVENIDA$|AVDA$|NUMERO$|NRO$|CIUDAD$|PROVINCIA$|PAIS$|C\.P\.?$|CODIGO\s*POSTAL$|ORIGINAL|FACTURA\s*DE\s*ABONO|NOMBRE\s*DE\s*TU\s*EMPRESA|NO\s*PEDIRO'
+
     # Buscar CUIT/CUIL
     cuit_match = re.search(cuit_pattern, text, re.IGNORECASE)
     if cuit_match:
-        # Aplicar corrección de OCR solo al valor extraído, si es necesario, antes de asignarlo.
-        data["cuit_cuil"] = correct_ocr_errors(cuit_match.group(1).strip())
+        # No aplicar corrección de OCR a CUIT/CUIL para evitar distorsiones
+        data["cuit_cuil"] = cuit_match.group(1).strip()
         logger.info(f"CUIT/CUIL encontrado: {data['cuit_cuil']}")
     else:
         logger.warning("CUIT/CUIL no encontrado.")
-    
-    # Buscar razón social (mejorado)
-    # Se buscará en un rango de líneas alrededor del CUIT/CUIL si se encontró, o cerca de "RAZÓN SOCIAL"
-    # Priorizar la búsqueda en la misma línea o en las adyacentes
-    razon_social_found = False
-    
-    # Patrones para razón social, incluyendo errores comunes de OCR y términos legales
-    # Más específicos para capturar nombres de empresas y evitar fechas/números
-    # Prioritize patterns with explicit keywords and company types
-    razon_social_patterns = [
-        # Pattern 1: Keywords like "RAZON SOCIAL", "DENOMINACION" followed by a name and optional company suffix. Anchored to end of line.
-        r'''(?:RAZ[OÓ]N\s*SOCIAL|DENOMINACI[OÓ]N|NOMBRE|EMPRESA|PROVEEDOR|CLIENTE)\s*[:\s]*([A-ZÁÉÍÓÚÑÜ0-9][A-Za-zÁÉÍÓÚÑÜ0-9\s\.,'\-\&\(\)]+(?:S\.A\.|S\.R\.L\.|S\.L\.|SRL|SA|S\.A\.S\.|SAS|E\.I\.R\.L\.|EIRL|LTDA\.|C\.V\.|S\.C\.|S\.COOP\.|COOP|A\.C\.|S\.EN\s*C\.|S\.C\.P\.|S\.A\.U\.|S\.L\.U\.|C\.B\.|SC|\.COM|\.ORG|\.NET|\.INFO|\.BIZ|\.ES|\.AR|\.MX|\.CO|\.CL|\.PE|\.EC|\.VE)?)\s*(?:\n|$)''',
-        # Pattern 2: Name followed by a mandatory company suffix.
-        r'''([A-ZÁÉÍÓÚÑÜ0-9][A-Za-zÁÉÍÓÚÑÜ0-9\s\.,'\-\&\(\)]+)\s+(S\.A\.|S\.R\.L\.|S\.L\.|SRL|SA|S\.A\.S\.|SAS|E\.I\.R\.L\.|EIRL|LTDA\.|C\.V\.|S\.C\.|S\.COOP\.|COOP|A\.C\.|S\.EN\s*C\.|S\.C\.P\.|S\.A\.U\.|S\.L\.U\.|C\.B\.|SC)''',
-        # Pattern 3: More generic, captures capitalized words, potentially a company name, often found near top or CUIT.
-        # This pattern is less specific and should be used carefully, possibly with more context or post-validation.
-        # It looks for a sequence of capitalized words, possibly including '.', ',', '&', '-', '(', ')'.
-        # Avoids capturing lines that are clearly not company names (e.g. "FACTURA", "TOTAL", etc. handled by exclusion list)
-        r'''^([A-ZÁÉÍÓÚÑÜ0-9][A-Za-zÁÉÍÓÚÑÜ0-9\s\.,'\-\&\(\)]+[A-Za-zÁÉÍÓÚÑÜ0-9\)])\s*(?:\n|$)'''
-        # Removed r'''NOMBRE\s*DE\s*TU\s*EMPRESA\s*\n\s*(.+)''' as it is too specific.
-    ]
 
-    # Exclusion list for potential Razón Social matches
-    razon_social_exclusion_pattern = r'(?i)^(?:[\d\s/\.\-]+)$|^(?:(?:Efectivo|Débito|Crédito|Cheque|Transferencia|Contado|Tarjeta))$|^FECHA(?:S)?$|DATE(?:S)?$|EMISION(?:ES)?$|TOTAL(?:ES)?$|IMPORTE(?:S)?$|COMPROBANTE(?:S)?$|FACTURA(?:S)?$|N[°º]?$|C\.U\.I\.T\.?$|CUIT$|CUIL$|NIF$|CIF$|RUC$|PEDIDO$|RECIBO$|ALBARAN$|NOTA$|ORDEN$|CLIENTE$|PROVEEDOR$|DOMICILIO$|DIRECCION$|CONCEPTO$|DESCRIPCION$|CANTIDAD$|PRECIO$|UNIDADES$|SUBTOTAL$|IVA$|IMPUESTO(?:S)?$|GASTO(?:S)?$|ENVIO$|PAGAR$|COBRAR$|VENCIMIENTO$|CODIGO$|REFERENCIA$|CALLE$|AVENIDA$|AVDA$|NUMERO$|NRO$|CIUDAD$|PROVINCIA$|PAIS$|C\.P\.$|CODIGO\s*POSTAL$'
+    # Buscar Razón Social del Cliente (Prioridad 1: Línea siguiente a "CLIENTE")
+    lines = text.split('\n') # Ensure lines is defined
+    for i, line in enumerate(lines):
+        if "CLIENTE" in line.upper() and i + 1 < len(lines):
+            potential_client_rs = lines[i + 1].strip()
+            # Aplicar exclusión general para evitar capturar direcciones u ruido
+            if potential_client_rs and not re.match(razon_social_exclusion_pattern, potential_client_rs, re.IGNORECASE) and len(potential_client_rs) > 3:
+                data["razon_social"] = potential_client_rs
+                logger.info(f"Razón Social del Cliente encontrada (línea siguiente a 'CLIENTE'): {data['razon_social']}")
+                break # Salir del bucle una vez encontrada
 
-    # Buscar cerca del CUIT
-    if cuit_match:
-        start_index = text.find(cuit_match.group(0))
-        search_area = text[max(0, start_index - 150):min(len(text), start_index + 150)] # Reducir área de búsqueda un poco
-        
+    if data["razon_social"] is None:
+        # Prioridad 2: Razón Social del Emisor (a partir de las primeras 3 líneas)
+        first_few_lines = "\n".join(lines[:3]) # Tomar las primeras 3 líneas para el emisor
         for pattern in razon_social_patterns:
-            # For patterns that capture name and suffix separately (like pattern 2)
-            is_name_suffix_pattern = (pattern == razon_social_patterns[1])
-
-            razon_social_match = re.search(pattern, search_area, re.IGNORECASE | re.MULTILINE)
-            if razon_social_match:
-                if is_name_suffix_pattern:
-                    # Concatenate name and suffix if captured separately
-                    potential_razon_social = f"{razon_social_match.group(1).strip()} {razon_social_match.group(2).strip()}"
-                else:
-                    potential_razon_social = razon_social_match.group(1).strip()
-
-                # Evitar capturar fechas o números puros o palabras clave de factura using the exclusion pattern
-                if not re.match(razon_social_exclusion_pattern, potential_razon_social, re.IGNORECASE) and len(potential_razon_social) > 3 : # Added length check
-                    data["razon_social"] = potential_razon_social
-                    logger.info(f"Razón Social encontrada (cerca de CUIT, patrón: {pattern[:30]}...): {data['razon_social']}")
-                    razon_social_found = True
-                    break
-            if razon_social_found:
+            issuer_razon_social_match = re.search(pattern, first_few_lines, re.IGNORECASE | re.MULTILINE)
+            if issuer_razon_social_match:
+                potential_issuer_rs = issuer_razon_social_match.group(1).strip()
+                if not re.match(razon_social_exclusion_pattern, potential_issuer_rs, re.IGNORECASE) and len(potential_issuer_rs) > 3:
+                    data["razon_social"] = potential_issuer_rs
+                    logger.info(f"Razón Social del Emisor encontrada (primeras líneas, patrón: {pattern[:30]}...): {data['razon_social']}")
+                    break # Salir del bucle interno una vez encontrada
+            if data["razon_social"] is not None: # Salir del bucle externo si ya se encontró
                 break
-        if not razon_social_found:
-            logger.info("Razón Social no encontrada cerca de CUIT. Intentando búsqueda general.")
 
-    # Si no se encontró cerca del CUIT, intentar búsqueda general por líneas
-    if not razon_social_found:
-        lines = text.split('\n') # Ensure lines is defined if CUIT was not found either
+    if data["razon_social"] is None:
+        # Prioridad 3: Razón Social cerca del CUIT (lógica existente)
+        if cuit_match:
+            start_index = text.find(cuit_match.group(0))
+            search_area = text[max(0, start_index - 150):min(len(text), start_index + 150)]
+            for pattern in razon_social_patterns:
+                is_name_suffix_pattern = (pattern == razon_social_patterns[1])
+                razon_social_match = re.search(pattern, search_area, re.IGNORECASE | re.MULTILINE)
+                if razon_social_match:
+                    if is_name_suffix_pattern:
+                        potential_razon_social = f"{razon_social_match.group(1).strip()} {razon_social_match.group(2).strip()}"
+                    else:
+                        potential_razon_social = razon_social_match.group(1).strip()
+                    if not re.match(razon_social_exclusion_pattern, potential_razon_social, re.IGNORECASE) and len(potential_razon_social) > 3 :
+                        data["razon_social"] = potential_razon_social
+                        logger.info(f"Razón Social encontrada (cerca de CUIT, patrón: {pattern[:30]}...): {data['razon_social']}")
+                        break # Encontrada, salir de este bucle interno
+                if data["razon_social"] is not None: # Verificar si ya se encontró en este bloque
+                    break
+            if data["razon_social"] is None: # Si no se encontró cerca del CUIT
+                logger.info("Razón Social no encontrada cerca de CUIT. Intentando búsqueda general.")
+
+    if data["razon_social"] is None:
+        logger.warning("Razón Social no encontrada cerca de CUIT. Intentando búsqueda general.")
+        # Prioridad 4: Búsqueda general por líneas (lógica existente)
         for i, line in enumerate(lines):
-            # Buscar "Razón Social" o "Denominación" en la misma línea y capturar el resto
             for pattern in razon_social_patterns:
                 is_name_suffix_pattern = (pattern == razon_social_patterns[1])
                 match = re.search(pattern, line, re.IGNORECASE)
@@ -218,98 +222,47 @@ def extract_invoice_data(text):
                         potential_razon_social = f"{match.group(1).strip()} {match.group(2).strip()}"
                     else:
                         potential_razon_social = match.group(1).strip()
-
                     if potential_razon_social and not re.match(razon_social_exclusion_pattern, potential_razon_social, re.IGNORECASE) and len(potential_razon_social) > 3:
                         data["razon_social"] = potential_razon_social
                         logger.info(f"Razón Social encontrada (misma línea general, patrón: {pattern[:30]}...): {data['razon_social']}")
-                        razon_social_found = True
-                        break
-                if razon_social_found:
+                        break # Encontrada, salir del bucle interno
+                if data["razon_social"] is not None: # Verificar si ya se encontró en este bloque
                     break
-            
-            if razon_social_found:
+            if data["razon_social"] is not None: # Verificar si ya se encontró en este bloque
                 break
+        if data["razon_social"] is None:
+            logger.warning("Razón Social no encontrada en búsqueda general.")
 
-            # Si no, buscar la línea siguiente si la anterior contiene la palabra clave (e.g. "RAZON SOCIAL:" en una linea, nombre en la siguiente)
-            # Keywords that might indicate the company name is on the next line
-            next_line_keywords = ["RAZÓN SOCIAL", "RAZON SOCIAL", "DENOMINACION", "NOMBRE", "EMPRESA", "PROVEEDOR", "CLIENTE", "TITULAR", "SR./SRA." ]
-            if any(keyword.upper() in line.upper() for keyword in next_line_keywords) and i + 1 < len(lines):
-                next_line_text = lines[i + 1].strip()
-                # Attempt to match the most generic pattern on the next line or just take it if it's not excluded
-                generic_match_next_line = re.match(razon_social_patterns[2], next_line_text, re.IGNORECASE | re.MULTILINE)
-
-                if generic_match_next_line:
-                    potential_next_line_rs = generic_match_next_line.group(1).strip()
-                else:
-                    potential_next_line_rs = next_line_text
-
-                if potential_next_line_rs and not re.match(razon_social_exclusion_pattern, potential_next_line_rs, re.IGNORECASE) and len(potential_next_line_rs) > 3 and not any(keyword.upper() in potential_next_line_rs.upper() for keyword in next_line_keywords):
-                    data["razon_social"] = potential_next_line_rs
-                    logger.info(f"Razón Social encontrada (línea siguiente a '{line.strip()[:50]}...'): {data['razon_social']}")
-                    razon_social_found = True
-                    break
-        if not razon_social_found:
-            logger.info("Razón Social no encontrada en búsqueda general por líneas. Intentando en primeras líneas.")
-
-    # Simplified search for company names in the top part of the document if other methods fail
-    if not razon_social_found:
-        lines = text.split('\n') # Ensure lines is defined
-        top_lines_text = "\n".join(lines[:15]) # Look in the first 15 lines combined
-        for pattern in razon_social_patterns:
-            is_name_suffix_pattern = (pattern == razon_social_patterns[1])
-            # Try to find matches in the block of top lines
-            # Using finditer to get all matches and then try to pick the best one (e.g. longest, or first)
-            matches = list(re.finditer(pattern, top_lines_text, re.IGNORECASE | re.MULTILINE))
-            if matches:
-                for match in matches: # Iterate through all matches found by this pattern
-                    if is_name_suffix_pattern:
-                        potential_razon_social = f"{match.group(1).strip()} {match.group(2).strip()}"
-                    else:
-                        potential_razon_social = match.group(1).strip()
-
-                    if potential_razon_social and not re.match(razon_social_exclusion_pattern, potential_razon_social, re.IGNORECASE) and len(potential_razon_social) > 3:
-                        # Heuristic: prefer longer names or names with company suffixes
-                        if not data["razon_social"] or len(potential_razon_social) > len(data["razon_social"]) or any(suffix in potential_razon_social.upper() for suffix in ["S.A", "S.R.L", "S.L", "LLC", "INC", "LTD"]):
-                            data["razon_social"] = potential_razon_social
-                            logger.info(f"Razón Social encontrada (primeras líneas, pattern: {pattern[:30]}...): {data['razon_social']}")
-                            # Potentially set razon_social_found = True here if we are confident,
-                            # or let it try other patterns/matches in top lines.
-                            # For now, let's be greedy and take the first good one from top lines.
-                            razon_social_found = True
-                            break # Break from matches loop
-            if razon_social_found: # This break is for the inner loop of matches from finditer
-                break # Break from patterns loop if found in top lines
-        if not razon_social_found:
-            logger.warning("Razón Social no encontrada después de todos los métodos.")
-
-    # Buscar fecha
+    # Buscar Fecha
     fecha_match = re.search(fecha_pattern, text, re.IGNORECASE)
     if fecha_match:
-        # Aplicar corrección de OCR al valor de la fecha, si es necesario.
-        data["fecha"] = correct_ocr_errors(fecha_match.group(1).strip())
+        # No aplicar corrección de OCR al valor de la fecha para evitar distorsiones
+        data["fecha"] = fecha_match.group(1).strip()
         logger.info(f"Fecha encontrada: {data['fecha']}")
     else:
         logger.warning("Fecha no encontrada.")
     
-    # Buscar número de factura
+    # Buscar Número de Factura
     factura_match = re.search(factura_pattern, text, re.IGNORECASE)
     if factura_match:
-        # Aplicar corrección de OCR al valor de la factura, si es necesario.
-        data["numero_factura"] = correct_ocr_errors(factura_match.group(1).strip())
-        logger.info(f"Número de factura encontrado: {data['numero_factura']}")
+        # No aplicar corrección de OCR al valor de la factura para evitar distorsiones
+        data["numero_factura"] = factura_match.group(1).strip()
+        logger.info(f"Número de Factura encontrado: {data['numero_factura']}")
     else:
         logger.warning("Número de factura no encontrado.")
     
-    # Buscar importe total
+    # Buscar Importe Total
     total_match = re.search(total_pattern, text, re.IGNORECASE)
     if total_match:
         # Aplicar corrección de OCR antes de limpiar el valor monetario
         cleaned_total = clean_currency(correct_ocr_errors(total_match.group(1).strip()))
         if cleaned_total is not None:
             data["importe_total"] = cleaned_total
-            logger.info(f"Importe total encontrado: {data['importe_total']}")
+            logger.info(f"Importe Total encontrado: {data['importe_total']}")
         else:
-            logger.warning(f"Importe total encontrado, pero no pudo ser limpiado: {total_match.group(1).strip()}")
+            logger.warning(f"Importe Total encontrado, pero no pudo ser limpiado: {total_match.group(1).strip()}")
+    else:
+        logger.warning("Importe Total no encontrado.")
     
     # Buscar IVA
     iva_match = re.search(iva_pattern, text, re.IGNORECASE)
@@ -321,222 +274,130 @@ def extract_invoice_data(text):
             logger.info(f"IVA encontrado: {data['iva']}")
         else:
             logger.warning(f"IVA encontrado, pero no pudo ser limpiado: {iva_match.group(1).strip()}")
+    else:
+        logger.warning("IVA no encontrado.")
 
     logger.info(f"Resumen de datos de factura extraídos: CUIT={data['cuit_cuil']}, Fecha={data['fecha']}, RazonSocial={data['razon_social']}, FacturaNro={data['numero_factura']}, Total={data['importe_total']}, IVA={data['iva']}")
     
     # Extraer ítems de línea
-    data["line_items"] = extract_line_items(text)
-    
+    logger.info("Iniciando extracción de ítems de línea...")
+    line_items = extract_line_items(text)
+    data["line_items"] = line_items
+    logger.info(f"Total de ítems de línea extraídos: {len(line_items)}")
     return data
 
 # Nueva función para extraer los ítems de línea de una factura
 def extract_line_items(text: str) -> list:
     items = []
-    logger.info("Iniciando extracción de ítems de línea...")
-    
     lines = text.split('\n')
-    
-    # Patrones de palabras clave para identificar el inicio y fin de la tabla de ítems.
-    header_keywords = [
-        "codigo", "code", "producto", "item", "descripcion", "description", "descrip", "desc.",
-        "cantidad", "cant.", "qty", "unid", "unidades",
-        "precio", "p.u.", "p/u", "precio unitario", "unit price", "valor unit.",
-        "importe", "total", "subtotal", "valor", "sub-total", "sub total"
-    ]
-    # Pattern to detect a line that likely contains multiple header keywords
-    # This looks for a line with at least 2-3 header-like words.
-    # We compile this pattern for efficiency as it's used in a loop.
-    likely_header_line_pattern = re.compile(
-        r"|".join([r"\b" + kw + r"\b" for kw in header_keywords[:12]]), # Check for first few common ones
-        re.IGNORECASE
-    )
-
-    # Define sub-patterns for line items
-    # Optional Code/SKU: Allows alphanumeric, hyphens, dots, slashes. Requires at least 2 chars.
-    code_pattern_str = r'(?:([A-Z0-9\-\./_]{2,})\s+)?'
-    # Description: Non-greedy, captures most characters. At least 3 chars.
-    # It should not be too greedy to capture numbers from next columns.
-    # We try to stop it before a sequence of typical numeric values.
-    desc_pattern_str = r'(.+?)\s+'
-    # Numerical fields: Allow digits, spaces, commas, dots. Negative numbers allowed for totals.
-    # Needs careful post-processing to convert to float.
-    # This pattern tries to capture a number that might have thousands separators and a decimal part.
-    # It expects a digit at the end of the number part.
-    num_pattern_str = r'(-?[\d\s\.,]*\d)' # Basic number pattern
-    
-    # Combined Line Item Patterns:
-    # Order of patterns matters: from more specific (more columns) to less specific.
-    line_item_patterns = [
-        # 1. Code (opt), Desc, Qty, Unit Price, Line Total
-        re.compile(r"^\s*" + code_pattern_str + desc_pattern_str + num_pattern_str + r"\s+" + num_pattern_str + r"\s+" + num_pattern_str + r"\s*$", re.IGNORECASE),
-        # 2. Code (opt), Desc, Qty, Total (Unit Price is missing)
-        re.compile(r"^\s*" + code_pattern_str + desc_pattern_str + num_pattern_str + r"\s+" + num_pattern_str + r"\s*$", re.IGNORECASE),
-        # 3. Code (opt), Desc, Line Total (Qty and Unit Price are missing)
-        re.compile(r"^\s*" + code_pattern_str + desc_pattern_str + num_pattern_str + r"\s*$", re.IGNORECASE),
-        # 4. Desc, Qty, Unit Price, Line Total (No code)
-        re.compile(r"^\s*" + desc_pattern_str + num_pattern_str + r"\s+" + num_pattern_str + r"\s+" + num_pattern_str + r"\s*$", re.IGNORECASE),
-        # 5. Desc, Qty, Line Total (No code, Unit Price is missing)
-        re.compile(r"^\s*" + desc_pattern_str + num_pattern_str + r"\s+" + num_pattern_str + r"\s*$", re.IGNORECASE),
-        # 6. Desc, Line Total (No code, Qty and Unit Price are missing)
-        re.compile(r"^\s*" + desc_pattern_str + num_pattern_str + r"\s*$", re.IGNORECASE),
-    ]
-
-    # Keywords that usually signify the end of the items table or start of summary.
-    table_end_keywords = [
-        "subtotal", "sub-total", "sub total", "total", "importe total", "total factura",
-        "descuento", "bonificacion", "iva", "i.v.a", "impuesto", "retencion", "percepcion",
-        "base imponible", "neto", "total a pagar", "efectivo", "tarjeta"
-    ]
-    table_end_pattern = re.compile(r"|".join([r"\b" + kw + r"\b" for kw in table_end_keywords]), re.IGNORECASE)
-
-    # Keywords for validating and cleaning description
-    description_exclusion_keywords = [
-        "subtotal", "total", "iva", "impuesto", "descuento", "envio", "gastos", "retencion",
-        "percepcion", "importe", "valor", "neto", "bruto", "base", "cantidad", "precio",
-        "codigo", "producto", "item", "descripcion", "fecha", "factura", "pedido"
-    ] # Add more as needed
-
-    def clean_number(s: str) -> Union[float, None]:
-        if s is None or not isinstance(s, str):
-            return None
-        s = s.strip()
-        if not s:
-            return None
-
-        # Remove spaces
-        s_cleaned = s.replace(' ', '')
-
-        # Standardize decimal and thousands separators
-        # Count dots and commas
-        num_dots = s_cleaned.count('.')
-        num_commas = s_cleaned.count(',')
-
-        if num_dots > 1 and num_commas == 1: # e.g., 1.234.567,89
-            s_cleaned = s_cleaned.replace('.', '').replace(',', '.')
-        elif num_commas > 1 and num_dots == 1: # e.g., 1,234,567.89
-            s_cleaned = s_cleaned.replace(',', '')
-        elif num_commas == 1 and num_dots == 0: # e.g., 1234,56
-             s_cleaned = s_cleaned.replace(',', '.')
-        # If num_dots == 1 and num_commas == 0 (e.g. 1234.56) or no separators, it's likely fine.
-        # If multiple dots and multiple commas, or other complex cases, this might need more advanced logic.
-        # For now, a simple removal of non-numeric except the last separator if it's a decimal.
-
-        # Fallback: remove all non-numeric characters except the last dot or comma and hyphen
-        s_cleaned_final = re.sub(r"[^0-9\.\-]", "", s_cleaned)
-        if s_cleaned_final.count('.') > 1: # If multiple dots remain, remove all but last
-            parts = s_cleaned_final.split('.')
-            s_cleaned_final = "".join(parts[:-1]) + "." + parts[-1]
-
-        try:
-            return float(s_cleaned_final)
-        except ValueError:
-            # Try removing all but digits and one dot
-            s_alternative = re.sub(r"[^0-9\.]", "", s_cleaned)
-            if s_alternative.count('.') > 1:
-                 parts = s_alternative.split('.')
-                 s_alternative = "".join(parts[:-1]) + "." + parts[-1]
-            try:
-                return float(s_alternative)
-            except ValueError:
-                logger.warning(f"Could not convert number: '{s}' to float. Cleaned: '{s_cleaned_final}'")
-                return None
-
     table_started = False
-    consecutive_non_item_lines = 0
-    max_consecutive_non_items = 4 # Stop if we see this many non-item lines after table start
+    max_consecutive_non_items = 5 # Number of non-item lines before stopping search
 
-    for line_idx, line_content in enumerate(lines):
-        line = line_content.strip()
+    # Keywords for header detection
+    header_keywords = ["descripcion", "cantidad", "precio", "importe", "iva", "producto", "servicio", "total", "subtotal", "codigo"]
+
+    def contains_enough_keywords(line_text, keywords, min_count=3):
+        found_count = 0
+        for kw in keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', line_text, re.IGNORECASE):
+                found_count += 1
+        return found_count >= min_count
+
+    # For quantities (integers or floats)
+    qty_pattern = r'\\b\\d+(?:[.,]\\d+)?\\b'
+    # For prices/totals (currency values) - uses clean_currency logic
+    price_total_pattern = r'(?:[\\$€£]\\s*)?\\d{1,3}(?:[.,\\s]\\d{3})*(?:[.,]\\d{2})?'
+    # For IVA percentage
+    iva_percent_pattern = r'\\d{1,2}(?:[.,]\\d+)?%'
+
+    # Line item header patterns (more flexible)
+    line_item_header_patterns = [
+        # Pattern 1: Very flexible for common headers, allowing for different order and optional fields
+        r'(?i)(?:C[oó]digo|Producto|Servicio|Descripci[oó]n|Unid\.?\s*Descripci[oó]n|Concepto|Item)(?:\s*(?:Cantidad|Qty\.?))?(?:\s*(?:U\.?\s*medida))?(?:\s*(?:Precio\s*Unit\.?|Precio))?(?:\s*(?:%?\s*Dto\.?))?(?:\s*(?:Subtotal|Total))?(?:\s*(?:Alicuota\s*IVA|%?\s*IVA))?(?:\s*(?:Subtotal\s*c\/IVA))?'
+    ]
+
+    # Line item patterns (more robust for different column orders and non-greedy descriptions)
+    # Using f-strings to embed sub-patterns correctly. Note the double curly braces for literal ones.
+    line_item_patterns = [
+        fr'(?i)(?P<codigo>\\b\\d{{1,5}}\\b)?\\s*(?P<descripcion>(?:(?!\\s*{qty_pattern}\\s*{price_total_pattern}\\s*{price_total_pattern}(?:\\s*\\|?\\s*{iva_percent_pattern})?).)+?)\\s+(?P<cantidad>{qty_pattern})\\s+(?P<precio_unitario>{price_total_pattern})\\s+(?P<total>{price_total_pattern})(?:\\s*\\|?\\s*(?P<iva_percent>{iva_percent_pattern}))?',
+        fr'(?i)(?P<descripcion>(?:(?!\\s*{qty_pattern}\\s*{price_total_pattern}\\s*{price_total_pattern}(?:\\s*\\|?\\s*{iva_percent_pattern})?).)+?)\\s+(?P<cantidad>{qty_pattern})\\s+(?P<precio_unitario>{price_total_pattern})\\s+(?P<total>{price_total_pattern})(?:\\s*\\|?\\s*(?P<iva_percent>{iva_percent_pattern}))?',
+        fr'(?i)(?P<codigo>\\b\\d{{1,5}}\\b)?\\s*(?P<descripcion>(?:(?!\\s*{price_total_pattern}\\s*{price_total_pattern}(?:\\s*\\|?\\s*{iva_percent_pattern})?).)+?)\\s+(?P<precio_unitario>{price_total_pattern})\\s+(?P<total>{price_total_pattern})(?:\\s*\\|?\\s*(?P<iva_percent>{iva_percent_pattern}))?'
+    ]
+
+    consecutive_non_item_lines = 0
+
+    for line_idx, line in enumerate(lines):
+        line = line.strip()
         if not line:
             continue
 
-        # 1. Detect table header
+        # Heuristic: Detect if this line looks like a potential item line (contains at least two numbers)
+        # This prevents processing irrelevant lines as item lines
+        numbers_in_line = re.findall(r'\\b\\d+(?:[.,]\\d+)?\\b', line)
+        if len(numbers_in_line) < 2 and not table_started: # Require at least 2 numbers for a line to be considered an item, unless table has started
+            logger.debug(f"Línea {line_idx+1} no contiene suficientes números para ser un ítem: {line}")
+            consecutive_non_item_lines += 1
+            if consecutive_non_item_lines >= max_consecutive_non_items and table_started:
+                logger.info(f"Fin de tabla de ítems detectado (demasiadas líneas consecutivas sin ítems en línea {line_idx + 1}): {line}")
+                break
+            elif consecutive_non_item_lines >= max_consecutive_non_items and not table_started:
+                 # If we haven't started the table yet and many non-item lines, stop looking for header too.
+                 if line_idx > len(lines) * 0.5: # If more than halfway through document
+                    logger.info(f"Deteniendo búsqueda de ítems y cabecera (muy abajo en el documento, línea {line_idx+1}, sin inicio de tabla).")
+                    break
+            continue
+
+
         if not table_started:
-            # A simple check: if a line contains 2 or more header keywords, consider it a header.
-            if len(likely_header_line_pattern.findall(line)) >= 2: # Check if enough keywords from header_keywords are in the line
+            if contains_enough_keywords(line, header_keywords, min_count=3):
                 table_started = True
-                logger.info(f"Tabla de ítems INICIADA (cabecera detectada en línea {line_idx + 1}): {line}")
-                continue
+                logger.info(f"Cabecera de tabla detectada en línea {line_idx+1}: {line}")
+                consecutive_non_item_lines = 0 # Reset counter after finding header
+                continue # Skip header line itself
 
         if table_started:
-            logger.debug(f"Procesando línea {line_idx + 1}/{len(lines)} para ítems: '{line}'")
-            # 2. Check for table end conditions
-            if table_end_pattern.search(line):
-                # Further check if the line looks like a summary line rather than an item description
-                # For example, if it contains "Total" and also a number, it's likely a summary.
-                if re.search(num_pattern_str, line): # Check if there's a number in the line as well
-                    logger.info(f"Fin de tabla de ítems detectado por palabra clave y número (línea {line_idx + 1}): {line}")
-                    break
-                else:
-                    logger.info(f"Potencial fin de tabla (solo palabra clave en línea {line_idx + 1}, continuando por si acaso): {line}")
-
-
             item_found_on_line = False
-            for pattern_idx, current_pattern in enumerate(line_item_patterns):
-                match = current_pattern.match(line)
+            # Divide the line by multiple spaces to normalize column separation, then join for regex
+            parts = re.split(r'\\s{2,}', line)
+            processed_line = " ".join(parts).strip()
+
+            for pattern in line_item_patterns:
+                match = re.search(pattern, processed_line)
                 if match:
-                    item_data = {"code": None, "description": None, "quantity": None, "unit_price": None, "line_total": None}
-                    groups = match.groups()
+                    item_data = {"descripcion": None, "cantidad": None, "precio_unitario": None, "line_total": None, "iva_percent": None}
                     
-                    # Determine pattern type based on regex and number of groups.
-                    # Pattern types:
-                    # A: code, desc, qty, price, total (5 groups if code, 4 if no code)
-                    # B: code, desc, qty, total (4 groups if code, 3 if no code)
-                    # C: code, desc, total (3 groups if code, 2 if no code)
+                    if match.group("descripcion"):
+                        item_data["descripcion"] = match.group("descripcion").strip()
+                    
+                    # Apply correct_ocr_errors and clean_number/clean_currency
+                    if match.group("cantidad"):
+                        item_data["cantidad"] = clean_number(correct_ocr_errors(match.group("cantidad").strip()))
+                    
+                    if match.group("precio_unitario"):
+                        item_data["precio_unitario"] = clean_currency(correct_ocr_errors(match.group("precio_unitario").strip()))
+                    
+                    if match.group("total"):
+                        item_data["line_total"] = clean_currency(correct_ocr_errors(match.group("total").strip()))
 
-                    desc_val = None
-                    qty_val_str = None
-                    price_val_str = None
-                    total_val_str = None
-
-                    if pattern_idx == 0: # Code, Desc, Qty, Price, Total
-                        item_data["code"] = groups[0].strip() if groups[0] else None
-                        desc_val = groups[1].strip() if groups[1] else None
-                        qty_val_str = groups[2]
-                        price_val_str = groups[3]
-                        total_val_str = groups[4]
-                    elif pattern_idx == 1: # Code, Desc, Qty, Total
-                        item_data["code"] = groups[0].strip() if groups[0] else None
-                        desc_val = groups[1].strip() if groups[1] else None
-                        qty_val_str = groups[2]
-                        total_val_str = groups[3]
-                    elif pattern_idx == 2: # Code, Desc, Total
-                        item_data["code"] = groups[0].strip() if groups[0] else None
-                        desc_val = groups[1].strip() if groups[1] else None
-                        total_val_str = groups[2]
-                    elif pattern_idx == 3: # Desc, Qty, Price, Total (no code implicitly)
-                        desc_val = groups[0].strip() if groups[0] else None
-                        qty_val_str = groups[1]
-                        price_val_str = groups[2]
-                        total_val_str = groups[3]
-                    elif pattern_idx == 4: # Desc, Qty, Total (no code implicitly)
-                        desc_val = groups[0].strip() if groups[0] else None
-                        qty_val_str = groups[1]
-                        total_val_str = groups[2]
-                    elif pattern_idx == 5: # Desc, Total (no code implicitly)
-                        desc_val = groups[0].strip() if groups[0] else None
-                        total_val_str = groups[1]
-
-                    item_data["description"] = desc_val
-                    item_data["quantity"] = clean_number(qty_val_str)
-                    item_data["unit_price"] = clean_number(price_val_str)
-                    item_data["line_total"] = clean_number(total_val_str)
-
+                    if match.group("iva_percent"):
+                        item_data["iva_percent"] = clean_number(correct_ocr_errors(match.group("iva_percent").strip().replace('%', '')))
+                    
                     # Validation:
                     # 1. Description must exist and not be a keyword itself or purely numeric
-                    if not desc_val or desc_val.isdigit() or len(desc_val) < 2:
-                        logger.debug(f"Línea rechazada (descripción inválida): {line} -> {desc_val}")
+                    if not item_data["descripcion"] or item_data["descripcion"].isdigit() or len(item_data["descripcion"]) < 2:
+                        logger.debug(f"Línea rechazada (descripción inválida): {line} -> {item_data['descripcion']}")
                         continue # Try next pattern or line
 
                     is_desc_excluded_keyword = False
+                    description_exclusion_keywords = ["total", "importe", "subtotal", "iva", "impuesto", "gasto", "envio", "pagar", "cobrar", "vencimiento", "codigo", "referencia", "cliente", "proveedor", "domicilio", "direccion", "concepto", "cantidad", "precio", "unidades", "fecha", "date", "emision", "factura", "comprobante", "nro", "nif", "cif", "cuit", "cuil", "ruc", "remito", "pedido", "recibo", "albaran", "nota", "orden", "calle", "avenida", "avda", "numero", "nro", "ciudad", "provincia", "pais", "cp", "postal", "original", "factura de abono", "nombre de tu empresa", "no pedido", "efectivo", "debito", "credito", "cheque", "transferencia", "contado", "tarjeta"]
                     for kw in description_exclusion_keywords:
-                        if kw in desc_val.lower().split(): # Check if desc is just a keyword
+                        if kw in item_data["descripcion"].lower().split(): # Check if desc is just a keyword
                              # Check if the keyword is a substantial part of the description
-                            if len(desc_val) < len(kw) + 5: # e.g. "Total" vs "Total amount for product X"
+                            if len(item_data["descripcion"]) < len(kw) + 5: # e.g. "Total" vs "Total amount for product X"
                                 is_desc_excluded_keyword = True
                                 break
                     if is_desc_excluded_keyword:
-                        logger.debug(f"Línea rechazada (descripción es palabra clave): {line} -> {desc_val}")
+                        logger.debug(f"Línea rechazada (descripción es palabra clave): {line} -> {item_data['descripcion']}")
                         continue
 
 
@@ -550,11 +411,11 @@ def extract_line_items(text: str) -> list:
                     # For now, this is skipped for simplicity.
 
                     items.append(item_data)
-                    logger.info(f"Item de línea extraído ({current_pattern.pattern[:30]}...): {item_data}")
+                    logger.info(f"Item de línea extraído ({pattern.pattern[:30]}...): {item_data}")
                     item_found_on_line = True
                     consecutive_non_item_lines = 0 # Reset counter
                     break # Found a match for this line, move to next line
-            
+
             if not item_found_on_line:
                 consecutive_non_item_lines += 1
                 logger.debug(f"Línea {line_idx+1} no coincide con ningún patrón de ítem ({consecutive_non_item_lines}/{max_consecutive_non_items}): {line}")
@@ -715,6 +576,8 @@ def correct_ocr_errors(text):
         'B': '8', # Añadido por posible confusión con 8
         'g': '9', # Añadido por posible confusión con 9
         'E': '6', # Añadido por posible confusión con 6
+        '€': '', # Eliminar símbolo de euro
+        '£': '', # Eliminar símbolo de libra
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
