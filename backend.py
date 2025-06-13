@@ -97,7 +97,7 @@ def extract_invoice_data(text):
     cuit_match = re.search(cuit_pattern, text, re.IGNORECASE)
     if cuit_match:
         data["cuit_cuil"] = cuit_match.group(1).strip()
-        logger.info(f"CUIT/CUIL encontrado: {data["cuit_cuil"]}")
+        logger.info(f"CUIT/CUIL encontrado: {data['cuit_cuil']}")
     
     # Buscar razón social (mejorado)
     # Se buscará en un rango de líneas alrededor del CUIT/CUIL si se encontró, o cerca de "RAZÓN SOCIAL"
@@ -117,7 +117,7 @@ def extract_invoice_data(text):
                     # Intentar capturar la línea siguiente como razón social
                     if i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r'^[0-9]+\s*(\.?[0-9]+)?([,\.]\d+)?\s*(%|\$)?$', lines[i+1].strip()): # Evitar números solos
                         data["razon_social"] = lines[i + 1].strip()
-                        logger.info(f"Razón Social encontrada (cerca de {keyword}): {data["razon_social"]}")
+                        logger.info(f"Razón Social encontrada (cerca de {keyword}): {data['razon_social']}")
                         break
                 if data["razon_social"]:
                     break
@@ -130,20 +130,20 @@ def extract_invoice_data(text):
             if "RAZÓN SOCIAL" in line.upper() or "RAZON SOCIAL" in line.upper() or "DENOMINACION" in line.upper():
                 if i + 1 < len(lines) and lines[i + 1].strip() and not re.match(r'^[0-9]+\s*(\.?[0-9]+)?([,\.]\d+)?\s*(%|\$)?$', lines[i+1].strip()):
                     data["razon_social"] = lines[i + 1].strip()
-                    logger.info(f"Razón Social encontrada (búsqueda general): {data["razon_social"]}")
+                    logger.info(f"Razón Social encontrada (búsqueda general): {data['razon_social']}")
                     break
     
     # Buscar fecha
     fecha_match = re.search(fecha_pattern, text, re.IGNORECASE)
     if fecha_match:
         data["fecha"] = fecha_match.group(1).strip()
-        logger.info(f"Fecha encontrada: {data["fecha"]}")
+        logger.info(f"Fecha encontrada: {data['fecha']}")
     
     # Buscar número de factura
     factura_match = re.search(factura_pattern, text, re.IGNORECASE)
     if factura_match:
         data["numero_factura"] = factura_match.group(1).strip()
-        logger.info(f"Número de factura encontrado: {data["numero_factura"]}")
+        logger.info(f"Número de factura encontrado: {data['numero_factura']}")
     
     # Buscar importe total
     total_match = re.search(total_pattern, text, re.IGNORECASE)
@@ -152,7 +152,7 @@ def extract_invoice_data(text):
         all_total_matches = re.findall(total_pattern, text, re.IGNORECASE)
         if all_total_matches:
             data["importe_total"] = all_total_matches[-1].strip().replace('.', '').replace(',', '.')
-            logger.info(f"Importe total encontrado: {data["importe_total"]}")
+            logger.info(f"Importe total encontrado: {data['importe_total']}")
     
     # Buscar IVA
     iva_match = re.search(iva_pattern, text, re.IGNORECASE)
@@ -161,7 +161,7 @@ def extract_invoice_data(text):
         all_iva_matches = re.findall(iva_pattern, text, re.IGNORECASE)
         if all_iva_matches:
             data["iva"] = all_iva_matches[-1].strip().replace('.', '').replace(',', '.')
-            logger.info(f"IVA encontrado: {data["iva"]}")
+            logger.info(f"IVA encontrado: {data['iva']}")
     
     logger.info(f"Datos de factura extraídos: {data}")
     return data
