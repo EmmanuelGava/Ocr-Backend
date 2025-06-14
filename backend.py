@@ -723,6 +723,10 @@ async def upload_file(file: UploadFile = File(...)):
                 df_invoice_summary.to_excel(writer, index=False, sheet_name='Datos Factura')
                 if not df_line_items.empty:
                     df_line_items.to_excel(writer, index=False, sheet_name='Items de Línea')
+                
+                # Añadir una hoja con el texto completo extraído por Mistral AI para depuración
+                df_raw_text = pd.DataFrame([{"Raw Mistral AI Output": text}])
+                df_raw_text.to_excel(writer, index=False, sheet_name='Texto Crudo Mistral AI')
             
             # Preparar el buffer para lectura
             excel_buffer.seek(0)
