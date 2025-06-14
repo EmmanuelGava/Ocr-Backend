@@ -6,6 +6,6 @@ pandas
 openpyxl==3.1.2
 Pillow
 opencv-python-headless
-mistralai
+mistralai==0.4.2
 requests
 python-dotenv
