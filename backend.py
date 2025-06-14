@@ -18,8 +18,8 @@ from typing import Union
 import base64 # Importar base64
 
 # Importaciones de Tesseract y Layout Parser
-import pytesseract
-import layoutparser as lp
+# import pytesseract # Eliminado ya que se usa Mistral AI
+# import layoutparser as lp # Eliminado ya que se usa Mistral AI
 from mistralai import Mistral # Importar el cliente de Mistral AI
 
 # Configurar logging
