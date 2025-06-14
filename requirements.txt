@@ -8,3 +8,4 @@ Pillow
 opencv-python-headless
 mistralai
 requests
+python-dotenv
