@@ -15,14 +15,23 @@ import cv2
 import numpy as np
 from decimal import Decimal, InvalidOperation
 from typing import Union
+import base64 # Importar base64
 
 # Importaciones de Tesseract y Layout Parser
 import pytesseract
 import layoutparser as lp
+from mistralai import Mistral # Importar el cliente de Mistral AI
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Configurar la clave de API de Mistral AI
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+if not MISTRAL_API_KEY:
+    logger.error("La variable de entorno MISTRAL_API_KEY no está configurada.")
+    # Considerar lanzar una excepción o manejar este caso según la política de errores
+    # Por ahora, se dejará que la API de Mistral lance su propio error si la clave falta.
 
 app = FastAPI(title="Invoice OCR API")
 
@@ -31,6 +40,7 @@ app = FastAPI(title="Invoice OCR API")
 # layout_model = lp.models.PaddleDetectionLayoutModel(config_path=None, model_path=None, extra_config=None, device='cpu') # Ejemplo si se usara el modelo de deteccion de paddle
 
 # Para Tesseract, no hay una inicialización global como PaddleOCR, se usa directamente.
+# Se deshabilitará la inicialización global si se usa Mistral OCR.
 
 # Configurar CORS para permitir solicitudes desde el frontend
 app.add_middleware(
@@ -67,31 +77,46 @@ async def general_exception_handler(request, exc):
 # Función para extraer texto de una imagen usando OCR
 def extract_text_from_image(image: Image.Image):
     try:
-        # Preprocesar la imagen (convertir a escala de grises y aplicar umbralización)
-        processed_image = preprocess_image(image)
+        # Inicializar el cliente de Mistral AI
+        client = Mistral(api_key=MISTRAL_API_KEY)
         
-        # Convertir la imagen procesada a un array de NumPy (para LayoutParser si se usa)
-        image_np = np.array(processed_image)
+        # Convertir la imagen PIL a bytes y luego a Base64
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG") # Usar PNG para mantener la calidad
+        img_str_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-        # Opcional: Detección de diseño con Layout Parser
-        # Si el documento tiene una estructura compleja, esto puede ayudar a organizar el texto.
-        # Ejemplo básico: Esto requiere un modelo preentrenado o entrenar uno.
-        # Por ahora, simplemente usaremos pytesseract en toda la imagen, pero la importación
-        # de layoutparser ya está lista para una futura implementación.
+        # Preparar el mensaje para la API de chat de Mistral con la imagen en Base64
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Extrae todo el texto de esta factura. Si es posible, organiza la información en un formato estructurado o describe las secciones clave como encabezado, ítems de línea y totales."},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str_base64}"}}
+                ]
+            }
+        ]
 
-        # Ejecutar OCR con Tesseract
-        # -l spa+eng: Especifica los idiomas español e inglés.
-        # --psm 6: Page Segmentation Mode (PSM) 6 asume una sola columna de texto uniforme.
-        # Otros PSM: 3 (valor predeterminado, automático), 4 (bloque de texto único), 11 (palabras).
-        full_text = pytesseract.image_to_string(processed_image, lang='spa+eng', config='--psm 6')
+        # Hacer la llamada a la API de Mistral
+        # Usaremos un modelo con capacidades de visión, como 'pixtral-12b-2409' o 'mistral-small-latest'
+        # 'mistral-small-latest' es más eficiente en tokens.
+        logger.info("Realizando llamada a la API de Mistral AI para OCR...")
+        chat_response = client.chat.complete(
+            model="mistral-small-latest", # O 'pixtral-12b-2409' para más robustez en visión, si es preferible
+            messages=messages,
+            temperature=0.1, # Baja temperatura para resultados más deterministas
+        )
         
-        logger.info(f"Texto extraído de la imagen (primeros 100 chars): {full_text[:100]}")
+        full_text = chat_response.choices[0].message.content
+        
+        logger.info(f"Texto extraído por Mistral AI (primeros 500 chars): {full_text[:500]}")
         return full_text
     except Exception as e:
-        logger.error(f"Error en OCR con Tesseract: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en OCR con Tesseract: {str(e)}")
+        logger.error(f"Error al usar Mistral AI para OCR: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en OCR con Mistral AI: {str(e)}")
 
 # Nueva función para preprocesar la imagen
+# Esta función ahora podría ser redundante o necesitar ajustes si Mistral maneja el preprocesamiento internamente.
+# Por ahora, la mantenemos pero la llamada a preprocess_image se eliminará en extract_text_from_image.
 def preprocess_image(pil_image: Image.Image):
     """Mejora la imagen para el OCR aplicando filtros.
     """

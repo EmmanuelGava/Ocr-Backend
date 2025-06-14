@@ -3,8 +3,6 @@ FROM python:3.9-slim
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
-    tesseract-ocr \
-    tesseract-ocr-spa \
     poppler-utils \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
