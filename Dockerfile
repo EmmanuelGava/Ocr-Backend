@@ -16,18 +16,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copiar archivos de requisitos e instalar dependencias de Python
-# Asumo que requirements.txt está directamente en la raíz de tu repositorio de backend.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copiar el código de la aplicación
-# Esto copiará tu backend.py (y cualquier otro archivo en la raíz del repo) a /app/
+# Copiar el código de la aplicación y requirements.txt
 COPY . .
+
+# Primero, instalar numpy específicamente para asegurar la versión compatible.
+# Esto es una solución para forzar la versión si otras dependencias intentan instalar una más nueva.
+RUN pip install --no-cache-dir "numpy==1.26.4"
+
+# Luego, instalar el resto de las dependencias desde requirements.txt.
+# Esto permitirá que pip use la versión de numpy ya instalada.
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Exponer el puerto
 EXPOSE 8000
 
-# Comando para ejecutar la aplicación con Uvicorn
-# Asumo que tu archivo principal es 'backend.py' y está directamente en /app/
+# Comando para ejecutar la aplicación
 CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8000"]
