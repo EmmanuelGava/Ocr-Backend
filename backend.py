@@ -17,6 +17,9 @@ from dotenv import load_dotenv
 import base64
 import json
 
+# NUEVO: Importar PaddleOCR y sus dependencias
+from paddleocr import PaddleOCR
+
 # Cargar variables de entorno (solo para desarrollo local, en Railway se cargan automáticamente)
 load_dotenv()
 
@@ -69,7 +72,47 @@ if not MISTRAL_API_KEY:
 
 mistral_client = MistralClient(api_key=MISTRAL_API_KEY) if MISTRAL_API_KEY else None
 
-# NUEVO: Función para extraer texto de una imagen usando OCR.space
+# NUEVO: Inicializar PaddleOCR (ejecutar solo una vez)
+# Usamos lang='es' para español
+# Usamos use_gpu=False para Render/Railway si no tienes GPU disponible
+# Ojo: la primera ejecución puede descargar los modelos, lo que puede tardar
+try:
+    paddle_ocr_client = PaddleOCR(use_angle_cls=True, lang='es', use_gpu=False, show_log=False)
+    logger.info("PaddleOCR client inicializado.")
+except Exception as e:
+    logger.error(f"Error al inicializar PaddleOCR: {e}")
+    paddle_ocr_client = None
+
+# NUEVO: Función para extraer texto de una imagen usando PaddleOCR
+async def perform_paddle_ocr(image_buffer: bytes) -> str:
+    if not paddle_ocr_client:
+        raise HTTPException(status_code=500, detail="PaddleOCR no está disponible (error de inicialización).")
+
+    # PaddleOCR prefiere rutas de archivo o numpy arrays. Guardaremos en un archivo temporal.
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
+        temp_file.write(image_buffer)
+        temp_file_path = temp_file.name
+    
+    try:
+        # `det` es para detección de texto, `rec` para reconocimiento (OCR)
+        result = paddle_ocr_client.ocr(temp_file_path, cls=True)
+        
+        ocr_text = ""
+        for line in result:
+            for word_info in line:
+                # word_info es [coordenadas, (texto, confianza)]
+                ocr_text += word_info[1][0] + " "
+            ocr_text += "\n" # Nueva línea para cada línea detectada
+        
+        return ocr_text.strip()
+    except Exception as e:
+        logger.error(f"Error al realizar OCR con PaddleOCR: {e}")
+        raise HTTPException(status_code=500, detail=f"Fallo en el servicio OCR (PaddleOCR): {str(e)}")
+    finally:
+        # Limpiar el archivo temporal
+        os.remove(temp_file_path)
+
+# Función para extraer texto de una imagen usando OCR.space
 async def perform_ocr_space(image_buffer: bytes, file_type: str) -> str:
     if not OCR_SPACE_API_KEY:
         raise HTTPException(status_code=500, detail="OCR_SPACE_API_KEY no está configurada.")
@@ -118,7 +161,7 @@ def extract_invoice_data_regex(text: str) -> dict:
     # CUIT/CUIL: 11 dígitos con guiones opcionales
     cuit_pattern = r'(?:CUIT|CUIL|C\.U\.I\.T\.|C\.U\.I\.L\.)[:\s]*([0-9]{2}[-\s]?[0-9]{8}[-\s]?[0-9])'
     # Fecha: formatos comunes de fecha
-    fecha_pattern = r'(?:FECHA|Date)[:\s]*(\d{1,2}[/\\-\.]\d{1,2}[/\\-\.]\d{2,4})'
+    fecha_pattern = r'(?:FECHA|Date)[:\s]*(\d{1,2}[/\\-\\.]\d{1,2}[/\\-\\.]\d{2,4})'
     # Número de factura
     factura_pattern = r'(?:FACTURA|FAC|FACTURA\s+N[°º])[:\s]*([A-Z]?[-\s]?[0-9]{4,8}[-\s]?[0-9]{8})'
     # Importe total
@@ -174,27 +217,24 @@ async def root():
     return {"message": "API de OCR para facturas. Visita /docs para la documentación."}
 
 @app.post("/upload")
-async def upload_file(files: list[UploadFile] = File(...)):
+async def upload_file(files: list[UploadFile] = File(...), ocr_provider: str = "ocr.space"):
     all_extracted_data = []
     
     for file in files:
         try:
             logger.info(f"Archivo recibido: {file.filename}")
             
-            # Verificar el tipo de archivo
             content_type = file.content_type
             if not (content_type.startswith("image/") or content_type == "application/pdf"):
                 logger.warning(f"Tipo de archivo no soportado para {file.filename}: {content_type}")
                 continue
             
-            # Leer el contenido del archivo directamente en un buffer
             content_buffer = await file.read()
             if not content_buffer:
                 logger.warning(f"El archivo {file.filename} está vacío")
                 continue
-            
-            # Convertir PDF a imagen si es necesario
-            processed_image_buffer = None
+                
+            pil_image = None
             if content_type == "application/pdf":
                 logger.info("Procesando PDF...")
                 images = pdf2image.convert_from_bytes(content_buffer)
@@ -214,15 +254,24 @@ async def upload_file(files: list[UploadFile] = File(...)):
             enhancer = ImageEnhance.Contrast(pil_image)
             pil_image = enhancer.enhance(1.5) # Aumentar contraste en un 50%
 
-            # Convertir la imagen procesada de nuevo a bytes para OCR.space (en formato PNG para consistencia)
+            # Convertir la imagen procesada de nuevo a bytes para OCR
             img_byte_arr = io.BytesIO()
-            pil_image.save(img_byte_arr, format='PNG')
+            # Usamos PNG para consistencia, ya que PaddleOCR puede tener diferentes comportamientos con JPG
+            pil_image.save(img_byte_arr, format='PNG') 
             processed_image_buffer = img_byte_arr.getvalue()
             file_type_for_ocr = "image/png"
 
-            # --- OCR Step (using OCR.space) ---
-            logger.info(f"Realizando OCR para {file.filename} con OCR.space...")
-            ocr_text = await perform_ocr_space(processed_image_buffer, file_type_for_ocr)
+            # --- Selección del proveedor de OCR ---
+            ocr_text = ""
+            if ocr_provider == "paddleocr":
+                logger.info(f"Realizando OCR para {file.filename} con PaddleOCR...")
+                ocr_text = await perform_paddle_ocr(processed_image_buffer)
+            elif ocr_provider == "ocr.space":
+                logger.info(f"Realizando OCR para {file.filename} con OCR.space...")
+                ocr_text = await perform_ocr_space(processed_image_buffer, file_type_for_ocr)
+            else:
+                raise HTTPException(status_code=400, detail=f"Proveedor de OCR no válido: {ocr_provider}")
+
             logger.info(f"OCR completado para {file.filename}. Texto extraído (primeras 500 chars): {ocr_text[:500]}")
 
             if not ocr_text.strip():
@@ -274,7 +323,7 @@ async def upload_file(files: list[UploadFile] = File(...)):
 
             logger.info(f"Datos de factura extraídos para {file.filename}: {extracted_data}")
             all_extracted_data.append(extracted_data)
-
+        
         except HTTPException as e:
             logger.error(f"Error HTTP procesando {file.filename}: {e.detail}")
         except Exception as e:
