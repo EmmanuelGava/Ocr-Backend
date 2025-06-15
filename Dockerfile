@@ -13,14 +13,16 @@ WORKDIR /app
 
 # Copiar archivos de requisitos e instalar dependencias de Python
 COPY requirements.txt .
+RUN pip install --no-cache-dir "numpy==1.26.4"  # Forzar la versión de numpy
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar el código de la aplicación
 COPY . .
 
 # Paso para pre-descargar los modelos de PaddleOCR durante la construcción
-# Esto asegura que los modelos estén disponibles cuando la aplicación se inicie
-RUN python -c "from paddleocr import PaddleOCR; _=PaddleOCR(use_angle_cls=True, lang='es', use_gpu=False, show_log=False)"
+# Se añade KMP_DUPLICATE_LIB_OK para resolver posibles conflictos OpenMP
+# Se añaden print statements para mayor verbosidad en los logs de construcción
+RUN python -c "import os; os.environ[\'KMP_DUPLICATE_LIB_OK\']=\'TRUE\'; from paddleocr import PaddleOCR; print(\'Intentando inicializar PaddleOCR para pre-descarga de modelos...\'); _=PaddleOCR(use_angle_cls=True, lang=\'es\', use_gpu=False); print(\'PaddleOCR: Modelos pre-descargados exitosamente.\')"
 
 # Exponer el puerto
 EXPOSE 8000
