@@ -197,18 +197,28 @@ async def upload_file(files: list[UploadFile] = File(...)):
             processed_image_buffer = None
             if content_type == "application/pdf":
                 logger.info("Procesando PDF...")
-                # Convertir PDF a imágenes (PIL Image objects)
                 images = pdf2image.convert_from_bytes(content_buffer)
                 if not images:
                     raise HTTPException(status_code=400, detail=f"No se pudieron extraer imágenes del PDF {file.filename}")
-                # Tomar la primera imagen y convertirla a bytes en formato PNG
-                img_byte_arr = io.BytesIO()
-                images[0].save(img_byte_arr, format='PNG')
-                processed_image_buffer = img_byte_arr.getvalue()
-                file_type_for_ocr = "image/png"
+                pil_image = images[0] # Tomar la primera imagen del PDF
             else:  # Imagen
-                processed_image_buffer = content_buffer
-                file_type_for_ocr = content_type
+                pil_image = Image.open(io.BytesIO(content_buffer))
+
+            # --- Pre-procesamiento de la imagen (Grayscale, Contraste) ---
+            logger.info(f"Aplicando pre-procesamiento a la imagen {file.filename}...")
+            # Convertir a escala de grises
+            pil_image = pil_image.convert("L")
+
+            # Mejorar contraste (opcional, puedes ajustar los valores o probar otros métodos)
+            from PIL import ImageEnhance
+            enhancer = ImageEnhance.Contrast(pil_image)
+            pil_image = enhancer.enhance(1.5) # Aumentar contraste en un 50%
+
+            # Convertir la imagen procesada de nuevo a bytes para OCR.space (en formato PNG para consistencia)
+            img_byte_arr = io.BytesIO()
+            pil_image.save(img_byte_arr, format='PNG')
+            processed_image_buffer = img_byte_arr.getvalue()
+            file_type_for_ocr = "image/png"
 
             # --- OCR Step (using OCR.space) ---
             logger.info(f"Realizando OCR para {file.filename} con OCR.space...")
