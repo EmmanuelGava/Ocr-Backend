@@ -10,3 +10,4 @@ mistralai==0.4.2
 requests
 python-dotenv
 paddleocr==2.6.0.1
+paddlepaddle==2.6.0
