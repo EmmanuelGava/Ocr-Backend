@@ -9,3 +9,4 @@ opencv-python-headless
 mistralai==0.4.2
 requests
 python-dotenv
+paddleocr==2.6.0.1
