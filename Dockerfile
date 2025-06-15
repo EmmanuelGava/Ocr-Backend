@@ -1,11 +1,15 @@
 FROM python:3.9-slim
 
-# Instalar dependencias del sistema requeridas para PaddleOCR y otras librerías
+# Instalar dependencias del sistema requeridas para Tesseract OCR, Pillow y pdf2image
+# - libgl1: Para operaciones gráficas (OpenCV, Pillow).
+# - poppler-utils: Para pdf2image (conversión de PDF a imagen).
+# - tesseract-ocr: El motor de Tesseract OCR.
+# - tesseract-ocr-spa: Los datos de idioma español para Tesseract.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
-    libgomp1 \
-    libglib2.0-0 \
     poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-spa \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -13,16 +17,10 @@ WORKDIR /app
 
 # Copiar archivos de requisitos e instalar dependencias de Python
 COPY requirements.txt .
-RUN pip install --no-cache-dir "numpy==1.26.4"  # Forzar la versión de numpy
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar el código de la aplicación
 COPY . .
-
-# Paso para pre-descargar los modelos de PaddleOCR durante la construcción
-# Se añade KMP_DUPLICATE_LIB_OK para resolver posibles conflictos OpenMP
-# Se añaden print statements para mayor verbosidad en los logs de construcción
-RUN python -c "import os; os.environ[\'KMP_DUPLICATE_LIB_OK\']=\'TRUE\'; from paddleocr import PaddleOCR; print(\'Intentando inicializar PaddleOCR para pre-descarga de modelos...\'); _=PaddleOCR(use_angle_cls=True, lang=\'es\', use_gpu=False); print(\'PaddleOCR: Modelos pre-descargados exitosamente.\')"
 
 # Exponer el puerto
 EXPOSE 8000
