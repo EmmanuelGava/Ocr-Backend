@@ -11,17 +11,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copiar archivos de requisitos e instalar dependencias
-# Asumo que requirements.txt está en la raíz de tu repo de backend o en /app si lo mueves
+# Asumo que requirements.txt está en la raíz del repo
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar el código de la aplicación
-# Esto copiará la carpeta 'scripts' y su contenido a /app/scripts/
+# Esto copiará backend.py (y cualquier otro archivo en la raíz del repo) a /app/
 COPY . .
 
 # Exponer el puerto
 EXPOSE 8000
 
 # Comando para ejecutar la aplicación
-# Ajustado para reflejar que backend.py está dentro de la carpeta 'scripts'
-CMD ["uvicorn", "scripts.backend:app", "--host", "0.0.0.0", "--port", "8000"]
+# Ajustado para reflejar que backend.py está directamente en la raíz del WORKDIR /app
+CMD ["uvicorn", "backend:app", "--host", "0.0.0.0", "--port", "8000"]
