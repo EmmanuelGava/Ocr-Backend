@@ -236,7 +236,28 @@ async def upload_file(files: list[UploadFile] = File(...)):
                     chat_response = mistral_client.chat(
                         model='mistral-large-latest',
                         messages=[
-                            {"role": "system", "content": 'You are an AI assistant that extracts structured data from invoice text. Respond only with a JSON object. For each field, if not found, use null. Extract numeric values, converting comma decimals to dot decimals. Be precise with the following fields:\n- CUIT/CUIL: Look for "CUIT", "CUIL", "NIF", or similar identifiers followed by a number. The format is typically XX-XXXXXXXX-X.\n- Company Name (razon_social): This is the legal name of the entity issuing the invoice, often found near the address, CUIT/CUIL, or at the top of the document. Do not confuse it with recipient names.\n- Date: Extract the date of issue.\n- Invoice Number: Look for "FACTURA", "Nº", "FAC", or similar, followed by the invoice number.\n- Total Amount: The final amount of the invoice, usually labeled "TOTAL" or "IMPORTE TOTAL".\n- IVA: The Value Added Tax amount, usually labeled "IVA" or "I.V.A.".\n- Items (productos): Extract a list of product line items. Each item should be an object with the following keys:\n  - codigo: The product code.\n  - producto: The product description.\n  - cantidad: The quantity, as a number.\n  - precio_unitario: The unit price, as a number.\n  - subtotal: The subtotal for that line item, as a number.\n  If no items are found, use an empty array.'},
+                            {
+                                "role": "system",
+                                "content": """You are an AI assistant that extracts structured data from invoice text. Respond only with a JSON object. For each field, if not found, use null. Extract numeric values, converting comma decimals to dot decimals. Be precise with the following fields:
+- CUIT/CUIL: Look for "CUIT", "CUIL", "NIF", or similar identifiers followed by a number. The format is typically XX-XXXXXXXX-X.
+- Company Name (razon_social): This is the legal name of the entity issuing the invoice, often found near the address, CUIT/CUIL, or at the top of the document. Do not confuse it with recipient names.
+- Date (fecha): Extract the date of issue in DD/MM/YYYY format.
+- Invoice Number (numero_factura): Look for "FACTURA", "Nº", "FAC", or similar, followed by the invoice number.
+- Type of Voucher (tipo_comprobante): Identify the type of document like "Factura A", "Factura B", "Ticket", "Recibo", "Nota de Crédito". If just "Factura" is present, use "Factura".
+- Point of Sale (punto_de_venta): Extract the numerical point of sale from the invoice number, usually the first part (e.g., "0001" from "0001-00000001").
+- Issuer VAT Condition (condicion_iva_emisor): Extract the VAT condition of the issuer, like "IVA Responsable Inscripto", "Monotributista", "Exento", "Consumidor Final".
+- Recipient DNI (dni_receptor): Extract the DNI or identification number of the recipient, if present.
+- Recipient Name (nombre_receptor): Extract the name or company name of the recipient, if present.
+- Total Amount (importe_total): The final amount of the invoice, usually labeled "TOTAL" or "IMPORTE TOTAL". Ensure it's a number.
+- IVA (iva): The Value Added Tax amount, usually labeled "IVA" or "I.V.A.". Ensure it's a number.
+- Items (productos): Extract a list of product line items. Each item should be an object with the following keys:
+  - codigo: The product code.
+  - producto: The product description.
+  - cantidad: The quantity, as a number.
+  - precio_unitario: The unit price, as a number.
+  - subtotal: The subtotal for that line item, as a number.
+  If no items are found, use an empty array."""
+                            },
                             {"role": "user", "content": f"Extract data from this invoice text: \n\n{ocr_text}"}
                         ],
                         response_format={"type": "json_object"}
